@@ -8,21 +8,71 @@ if (workbox) {
     runtime: 'runtime'
   });
 
-  workbox.precaching.precacheAndRoute([]);
+  // Precache static assets
+  workbox.precaching.precacheAndRoute([
+    { url: '/', revision: null },
+    { url: '/index.html', revision: null },
+    { url: '/manifest.json', revision: null },
+    { url: '/sw.js', revision: null },
+    // Add other static assets
+  ]);
 
-  // Cache strategies
+  // Cache strategies for dynamic data
   workbox.routing.registerRoute(
     new RegExp('/stories'),
-    new workbox.strategies.NetworkFirst({
-      cacheName: 'stories-cache',
+    new workbox.strategies.StaleWhileRevalidate({
+      cacheName: 'stories-api-cache',
+      plugins: [
+        new workbox.cacheableResponse.CacheableResponsePlugin({
+          statuses: [0, 200],
+        }),
+        new workbox.expiration.ExpirationPlugin({
+          maxEntries: 50,
+          maxAgeSeconds: 24 * 60 * 60, // 24 hours
+        }),
+      ],
+    }),
+    'GET'
+  );
+
+  // Cache images
+  workbox.routing.registerRoute(
+    new RegExp('https://story-api.dicoding.dev/images/'),
+    new workbox.strategies.CacheFirst({
+      cacheName: 'story-images-cache',
+      plugins: [
+        new workbox.expiration.ExpirationPlugin({
+          maxEntries: 100,
+          maxAgeSeconds: 7 * 24 * 60 * 60, // 7 days
+        }),
+      ],
     })
   );
 
+  // Cache other API endpoints
   workbox.routing.registerRoute(
     new RegExp('https://story-api.dicoding.dev'),
-    new workbox.strategies.StaleWhileRevalidate({
+    new workbox.strategies.NetworkFirst({
       cacheName: 'api-cache',
+      plugins: [
+        new workbox.cacheableResponse.CacheableResponsePlugin({
+          statuses: [0, 200],
+        }),
+      ],
     })
+  );
+
+  // Background sync for offline actions
+  workbox.routing.registerRoute(
+    /\/notifications\/subscribe/,
+    new workbox.strategies.NetworkOnly({
+      plugins: [
+        new workbox.backgroundSync.BackgroundSyncPlugin('notification-queue', {
+          maxRetentionTime: 24 * 60 // Retry for max of 24 Hours
+        })
+      ]
+    }),
+    'POST'
   );
 
   // Push notification handler
@@ -41,7 +91,7 @@ if (workbox) {
       vibrate: [100, 50, 100],
       data: {
         dateOfArrival: Date.now(),
-        primaryKey: 1
+        storyId: data.storyId // Add story ID if available
       },
       actions: [
         {
@@ -50,10 +100,13 @@ if (workbox) {
           icon: '/icon-192x192.png'
         },
         {
-          action: 'close',
-          title: 'Tutup'
+          action: 'view_story',
+          title: 'Lihat Detail',
+          icon: '/icon-192x192.png'
         }
-      ]
+      ],
+      requireInteraction: true,
+      silent: false
     };
 
     event.waitUntil(
@@ -71,43 +124,20 @@ if (workbox) {
       event.waitUntil(
         clients.openWindow('/#/')
       );
+    } else if (event.action === 'view_story') {
+      const storyId = event.notification.data?.storyId;
+      if (storyId) {
+        event.waitUntil(
+          clients.openWindow(`/#/?story=${storyId}`)
+        );
+      } else {
+        event.waitUntil(
+          clients.openWindow('/#/')
+        );
+      }
     }
   });
 
-  // Background sync for offline actions
-  workbox.routing.registerRoute(
-    /\/notifications\/subscribe/,
-    new workbox.strategies.NetworkOnly({
-      plugins: [
-        new workbox.backgroundSync.BackgroundSyncPlugin('notification-queue', {
-          maxRetentionTime: 24 * 60 // Retry for max of 24 Hours (specified in minutes)
-        })
-      ]
-    }),
-    'POST'
-  );
 } else {
   console.log('Workbox failed to load');
 }
-
-self.addEventListener('push', event => {
-  const data = event.data ? event.data.json() : {};
-  const title = data.title || 'Notifikasi Baru';
-  const options = {
-    body: data.body || 'Ada update cerita!',
-    icon: '/icon.png',  // Ganti dengan path ikon Anda
-    badge: '/badge.png',  // Opsional, untuk badge
-    data: data.url || '/'  // URL untuk redirect saat diklik
-  };
-  event.waitUntil(
-    self.registration.showNotification(title, options)
-  );
-});
-
-// Tambahkan event listener untuk klik notifikasi (opsional, untuk redirect)
-self.addEventListener('notificationclick', event => {
-  event.notification.close();
-  event.waitUntil(
-    clients.openWindow(event.notification.data || '/')
-  );
-});

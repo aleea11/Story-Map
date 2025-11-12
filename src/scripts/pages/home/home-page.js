@@ -1,475 +1,301 @@
 import ApiService from '../../data/api.js';
 import { showFormattedDate } from '../../utils/index.js';
 import IndexedDBHelper from '../../utils/idb.js';
+import PushNotificationManager from '../../utils/push-notification.js';
 
 export default class HomePage {
-  async render() {
-  return `
-    <section class="container">
-      <h1>Cerita Dicoding</h1>
-      <div class="notification-toggle">
-        <label for="notification-toggle">Aktifkan Push Notification:</label>
-        <input type="checkbox" id="notification-toggle">
-        <button id="push-toggle" class="btn">Aktifkan Notifikasi</button>
-      </div>
-      <div class="offline-controls">
-        <button id="sync-btn" class="btn-secondary">Sync Offline Data</button>
-        <button id="clear-cache-btn" class="btn-secondary">Clear Cache</button>
-      </div>
-      <div class="content-wrapper" id="content-wrapper" style="display: none;">
-        <div class="stories-list" id="stories-list"></div>
-        <div class="map-container" id="map" role="application" aria-label="Peta lokasi cerita"></div>
-      </div>
-      <a href="#/add-story" class="btn add-story-btn">Tambah Cerita Baru</a>
-    </section>
-  `;
+  constructor() {
+    this.pushManager = new PushNotificationManager();
+    
+    // Auto-sync when coming online
+    window.addEventListener("online", () => {
+      console.log("Back online, syncing...");
+      this._syncOfflineStories();
+    });
+  }
 
-}
+  async render() {
+    return `
+      <section class="container">
+        <h1>Cerita Dicoding</h1>
+        <div class="notification-toggle">
+          <label for="notification-toggle">Aktifkan Push Notification:</label>
+          <input type="checkbox" id="notification-toggle">
+        </div>
+        <div class="offline-controls">
+          <button id="sync-btn" class="btn-secondary">Sync Offline Data</button>
+          <button id="clear-cache-btn" class="btn-secondary">Clear Cache</button>
+        </div>
+        <div class="content-wrapper" id="content-wrapper" style="display: none;">
+          <div class="stories-list" id="stories-list"></div>
+          <div class="map-container" id="map" role="application" aria-label="Peta lokasi cerita"></div>
+        </div>
+        <a href="#/add-story" class="btn add-story-btn">Tambah Cerita Baru</a>
+      </section>
+    `;
+  }
 
   async afterRender() {
     await this._loadStories();
     this._initMap();
+    this._renderContent();
+    this._initPushToggle();
     this._initNotificationToggle();
     this._initOfflineControls();
-   
-  
-}
-  _initOfflineControls() {
-  const syncBtn = document.getElementById('sync-btn');
-  const clearCacheBtn = document.getElementById('clear-cache-btn');
-  
-  syncBtn.addEventListener('click', async () => {
-    await this._syncOfflineStories();
-    await this._loadStories(); // Reload to show synced data
-    await Swal.fire({
-      icon: 'success',
-      title: 'Sync Selesai',
-      text: 'Data offline telah disinkronisasi.',
-      timer: 2000,
-      showConfirmButton: false
-    });
-  });
-  
-  clearCacheBtn.addEventListener('click', async () => {
-    await IndexedDBHelper.clearAllStories();
-    await this._loadStories();
-    await Swal.fire({
-      icon: 'info',
-      title: 'Cache Dibersihkan',
-      text: 'Semua data cache telah dihapus.',
-      timer: 2000,
-      showConfirmButton: false
-    });
-  });
-}
+  }
 
-// Update home-page.js _clearCache method
-async _clearCache() {
-  try {
-    const result = await Swal.fire({
-      title: 'Hapus Cache?',
-      text: 'Semua data offline akan dihapus. Tindakan ini tidak dapat dibatalkan.',
-      icon: 'warning',
-      showCancelButton: true,
-      confirmButtonColor: '#d33',
-      cancelButtonColor: '#3085d6',
-      confirmButtonText: 'Ya, Hapus',
-      cancelButtonText: 'Batal'
-    });
+  _initPushToggle() {
+  const toggle = document.getElementById('push-toggle');
+  if (!toggle) return;
 
-    if (!result.isConfirmed) {
-      return; // User cancelled
+  toggle.checked = localStorage.getItem('push-subscribed') === 'true';
+
+  toggle.addEventListener('change', async (e) => {
+    if (e.target.checked) {
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') {
+        Swal.fire('Izin Notifikasi Ditolak ❌');
+        toggle.checked = false;
+        return;
+      }
+
+      const reg = await navigator.serviceWorker.getRegistration();
+      if (reg) {
+        reg.showNotification("Push Notification Aktif ✅", {
+          body: "Anda akan mendapatkan notifikasi cerita baru!",
+          icon: "/icons/icon-192x192.png"
+        });
+      }
+
+      localStorage.setItem('push-subscribed', 'true');
+      Swal.fire('Notifikasi Diaktifkan ✅');
+
+    } else {
+      localStorage.setItem('push-subscribed', 'false');
+      Swal.fire('Notifikasi Dinonaktifkan ⚠️');
     }
+  });
+}
 
-    console.log('Starting cache clear process...');
+
+  _initNotificationToggle() {
+    const toggle = document.getElementById('notification-toggle');
+    this.pushManager.initToggle(toggle);
+  }
+
+  _initOfflineControls() {
+    const syncBtn = document.getElementById('sync-btn');
+    const clearCacheBtn = document.getElementById('clear-cache-btn');
     
-    // Clear IndexedDB
-    await IndexedDBHelper.clearAllStories();
-    console.log('IndexedDB cleared');
+    syncBtn.addEventListener('click', async () => {
+      await this._syncOfflineStories();
+      await this._loadStories(); // Reload to show synced data
+      await Swal.fire({
+        icon: 'success',
+        title: 'Sync Selesai',
+        text: 'Data offline telah disinkronisasi.',
+        timer: 2000,
+        showConfirmButton: false
+      });
+    });
     
-    // Clear API cache if using workbox
-    if ('caches' in window) {
-      const cacheNames = await caches.keys();
-      console.log('Available caches:', cacheNames);
+    clearCacheBtn.addEventListener('click', async () => {
+      await this._clearCache();
+    });
+  }
+
+  async _clearCache() {
+    try {
+      const result = await Swal.fire({
+        title: 'Hapus Cache?',
+        text: 'Semua data offline akan dihapus. Tindakan ini tidak dapat dibatalkan.',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#d33',
+        cancelButtonColor: '#3085d6',
+        confirmButtonText: 'Ya, Hapus',
+        cancelButtonText: 'Batal'
+      });
+
+      if (!result.isConfirmed) {
+        return; // User cancelled
+      }
+
+      console.log('Starting cache clear process...');
       
-      for (const cacheName of cacheNames) {
-        if (cacheName.includes('story-app') || cacheName.includes('api-cache') || cacheName.includes('stories-cache')) {
-          await caches.delete(cacheName);
-          console.log('Deleted cache:', cacheName);
+      // Clear IndexedDB
+      await IndexedDBHelper.clearAllStories();
+      console.log('IndexedDB cleared');
+      
+      // Clear API cache if using workbox
+      if ('caches' in window) {
+        const cacheNames = await caches.keys();
+        console.log('Available caches:', cacheNames);
+        
+        for (const cacheName of cacheNames) {
+          if (cacheName.includes('story-app') || cacheName.includes('api-cache') || cacheName.includes('stories-cache')) {
+            await caches.delete(cacheName);
+            console.log('Deleted cache:', cacheName);
+          }
         }
       }
-    }
-    
-    // Clear localStorage if needed
-    // localStorage.clear(); // Uncomment if you want to clear all localStorage
-    
-    // Reload stories (will show empty or fetch from API)
-    await this._loadStories();
-    
-    await Swal.fire({
-      icon: 'success',
-      title: 'Cache Dibersihkan',
-      text: 'Semua data cache telah dihapus.',
-      timer: 2000,
-      showConfirmButton: false
-    });
-    
-  } catch (error) {
-    console.error('Error clearing cache:', error);
-    await Swal.fire({
-      icon: 'error',
-      title: 'Error',
-      text: `Terjadi kesalahan saat menghapus cache: ${error.message}`,
-    });
-  }
-}
-
-// Update _initOfflineControls
-_initOfflineControls() {
-  const syncBtn = document.getElementById('sync-btn');
-  const clearCacheBtn = document.getElementById('clear-cache-btn');
-  
-  syncBtn.addEventListener('click', () => {
-    this._syncOfflineStories();
-  });
-  
-  clearCacheBtn.addEventListener('click', () => {
-    this._clearCache();
-  });
-}
-
-
-_initNotificationToggle() {
-  const toggle = document.getElementById('notification-toggle');
-  
-  // Check current subscription status on load
-  if ('serviceWorker' in navigator && 'PushManager' in window) {
-    navigator.serviceWorker.ready.then((registration) => {
-      registration.pushManager.getSubscription().then((subscription) => {
-        toggle.checked = !!subscription;
-        console.log('Current subscription status:', !!subscription);
-      }).catch((error) => {
-        console.error('Error checking subscription:', error);
-        toggle.checked = false;
+      
+      // Reload stories (will show empty or fetch from API)
+      await this._loadStories();
+      
+      await Swal.fire({
+        icon: 'success',
+        title: 'Cache Dibersihkan',
+        text: 'Semua data cache telah dihapus.',
+        timer: 2000,
+        showConfirmButton: false
       });
-    }).catch((error) => {
-      console.error('Service worker not ready:', error);
-      toggle.checked = false;
-    });
-  } else {
-    console.log('Push notifications not supported');
-    toggle.disabled = true;
-    toggle.parentElement.innerHTML += '<small style="color: #666; margin-left: 1rem;">(Tidak didukung di browser ini)</small>';
-  }
-  
-  toggle.addEventListener('change', async (event) => {
-    const isChecked = event.target.checked;
-    console.log('Toggle changed:', isChecked);
-    
-    try {
-      if (isChecked) {
-        await this._subscribeToNotifications();
-      } else {
-        await this._unsubscribeFromNotifications();
-      }
+      
     } catch (error) {
-      console.error('Error in toggle handler:', error);
-      // Reset toggle state on error
-      event.target.checked = !isChecked;
+      console.error('Error clearing cache:', error);
       await Swal.fire({
         icon: 'error',
         title: 'Error',
-        text: 'Terjadi kesalahan saat mengubah pengaturan notifikasi.',
+        text: `Terjadi kesalahan saat menghapus cache: ${error.message}`,
       });
     }
-  });
-}
-
-async _subscribeToNotifications() {
-  console.log('Starting subscription process...');
-  
-  try {
-    // Check if service worker is ready
-    if (!('serviceWorker' in navigator)) {
-      throw new Error('Service Worker tidak didukung');
-    }
-    
-    const registration = await navigator.serviceWorker.ready;
-    console.log('Service worker ready');
-    
-    // Check notification permission
-    if (Notification.permission === 'denied') {
-      throw new Error('Izin notifikasi ditolak. Silakan aktifkan di pengaturan browser.');
-    }
-    
-    // Request permission if not granted
-    if (Notification.permission === 'default') {
-      const permission = await Notification.requestPermission();
-      if (permission !== 'granted') {
-        throw new Error('Izin notifikasi diperlukan untuk fitur ini.');
-      }
-    }
-    
-    // Get VAPID public key
-    const vapidPublicKey = 'BCCs2eonMI-6H2ctvFaWg-UYdDv387Vno_bzUzALpB442r2lCnsHmtrx8biyPi_E-1fSGABK_Qs_GlvPoJJqxbk';
-    
-    console.log('Subscribing to push...');
-    const subscription = await registration.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: this._urlBase64ToUint8Array(vapidPublicKey)
-    });
-    
-    console.log('Subscription created:', subscription);
-    
-    // Extract keys
-    const p256dhKey = subscription.getKey('p256dh');
-    const authKey = subscription.getKey('auth');
-    
-    if (!p256dhKey || !authKey) {
-      throw new Error('Gagal mendapatkan kunci subscription');
-    }
-    
-    // Send to server
-    const result = await ApiService.subscribeNotification({
-      endpoint: subscription.endpoint,
-      keys: {
-        p256dh: this._arrayBufferToBase64(p256dhKey),
-        auth: this._arrayBufferToBase64(authKey)
-      }
-    });
-    
-    if (result.error) {
-      throw new Error(result.message || 'Gagal subscribe ke server');
-    }
-    
-    console.log('Successfully subscribed');
-    await Swal.fire({
-      icon: 'success',
-      title: 'Push Notification Diaktifkan',
-      text: 'Anda akan menerima notifikasi ketika ada cerita baru.',
-      timer: 2000,
-      showConfirmButton: false
-    });
-    
-  } catch (error) {
-    console.error('Subscription failed:', error);
-    throw error; // Re-throw to be caught by toggle handler
   }
-}
 
-async _unsubscribeFromNotifications() {
-  console.log('Starting unsubscription process...');
-  
-  try {
-    if (!('serviceWorker' in navigator)) {
-      throw new Error('Service Worker tidak didukung');
-    }
-    
-    const registration = await navigator.serviceWorker.ready;
-    const subscription = await registration.pushManager.getSubscription();
-    
-    if (!subscription) {
-      console.log('No active subscription found');
-      return; // Not an error, just no subscription to remove
-    }
-    
-    console.log('Unsubscribing...');
-    
-    // Unsubscribe from server first
-    const result = await ApiService.unsubscribeNotification(subscription.endpoint);
-    
-    if (result.error) {
-      console.warn('Server unsubscribe failed, but continuing with local unsubscribe');
-    }
-    
-    // Unsubscribe locally
-    const success = await subscription.unsubscribe();
-    
-    if (!success) {
-      throw new Error('Gagal unsubscribe dari browser');
-    }
-    
-    console.log('Successfully unsubscribed');
-    await Swal.fire({
-      icon: 'info',
-      title: 'Push Notification Dinonaktifkan',
-      text: 'Anda tidak akan menerima notifikasi lagi.',
-      timer: 2000,
-      showConfirmButton: false
-    });
-    
-  } catch (error) {
-    console.error('Unsubscription failed:', error);
-    throw error; // Re-throw to be caught by toggle handler
-  }
-}
+  async _loadStories() {
+    const loadingIndicator = document.createElement('p');
+    loadingIndicator.id = "loading-indicator";
+    loadingIndicator.textContent = "Memuat cerita...";
+    document.querySelector('.container').prepend(loadingIndicator);
 
-
-// ... existing helper methods ...
-
-_urlBase64ToUint8Array(base64String) {
-  const padding = '='.repeat((4 - base64String.length % 4) % 4);
-  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-  const rawData = window.atob(base64);
-  const outputArray = new Uint8Array(rawData.length);
-  for (let i = 0; i < rawData.length; ++i) {
-    outputArray[i] = rawData.charCodeAt(i);
-  }
-  return outputArray;
-}
-
-_arrayBufferToBase64(buffer) {
-  let binary = '';
-  const bytes = new Uint8Array(buffer);
-  for (let i = 0; i < bytes.byteLength; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return window.btoa(binary);
-}
-
-async _loadStories() {
-  const loadingIndicator = document.createElement('p');
-  loadingIndicator.id = "loading-indicator";
-  loadingIndicator.textContent = "Memuat cerita...";
-  document.querySelector('.container').prepend(loadingIndicator);
-
-  const contentWrapper = document.getElementById('content-wrapper');
-
-  try {
-    let stories = [];
-
-    if (navigator.onLine) {
-      const result = await ApiService.getStories({ location: 1 });
-      if (!result.error) {
-        stories = result.listStory;
-        await this._cacheStoriesToIndexedDB(stories);
-      }
-    } else {
-      stories = await IndexedDBHelper.getAllStories();
-    }
-
-    this._renderStories(stories);
-    this.stories = stories;
-
-    loadingIndicator.style.display = 'none';
-    contentWrapper.style.display = 'grid';
-
-  } catch (error) {
-    console.error('Error loading stories:', error);
+    const contentWrapper = document.getElementById('content-wrapper');
 
     try {
-      const cachedStories = await IndexedDBHelper.getAllStories();
-      this._renderStories(cachedStories);
-      this.stories = cachedStories;
+      let stories = [];
+
+      if (navigator.onLine) {
+        const result = await ApiService.getStories({ location: 1 });
+        if (!result.error) {
+          stories = result.listStory;
+          await this._cacheStoriesToIndexedDB(stories);
+        }
+      } else {
+        stories = await IndexedDBHelper.getAllStories();
+      }
+
+      this._renderStories(stories);
+      this.stories = stories;
+
       loadingIndicator.style.display = 'none';
       contentWrapper.style.display = 'grid';
-    } catch (cacheError) {
-      loadingIndicator.textContent = 'Gagal memuat cerita. Coba periksa koneksi internet.';
-    }
-  }
-}
 
-
-async _cacheStoriesToIndexedDB(stories) {
-  for (const story of stories) {
-    try {
-      await IndexedDBHelper.addStory({ ...story, synced: true });
     } catch (error) {
-      // Story might already exist, try update
+      console.error('Error loading stories:', error);
+
       try {
-        await IndexedDBHelper.updateStory({ ...story, synced: true });
-      } catch (updateError) {
-        console.error('Error caching story:', updateError);
+        const cachedStories = await IndexedDBHelper.getAllStories();
+        this._renderStories(cachedStories);
+        this.stories = cachedStories;
+        loadingIndicator.style.display = 'none';
+        contentWrapper.style.display = 'grid';
+      } catch (cacheError) {
+        loadingIndicator.textContent = 'Gagal memuat cerita. Coba periksa koneksi internet.';
       }
     }
   }
-}
 
-async _syncOfflineStories() {
-  if (!navigator.onLine) {
-    await Swal.fire({
-      icon: 'warning',
-      title: 'Offline',
-      text: 'Tidak dapat sync karena tidak ada koneksi internet.',
-    });
-    return;
+  async _cacheStoriesToIndexedDB(stories) {
+    for (const story of stories) {
+      try {
+        await IndexedDBHelper.addStory({ ...story, synced: true });
+      } catch (error) {
+        // Story might already exist, try update
+        try {
+          await IndexedDBHelper.updateStory({ ...story, synced: true });
+        } catch (updateError) {
+          console.error('Error caching story:', updateError);
+        }
+      }
+    }
   }
-  
-  try {
-    const unsyncedStories = await IndexedDBHelper.getUnsyncedStories();
-    console.log('Unsynced stories found:', unsyncedStories.length);
-    
-    if (unsyncedStories.length === 0) {
+
+  async _syncOfflineStories() {
+    if (!navigator.onLine) {
       await Swal.fire({
-        icon: 'info',
-        title: 'Tidak Ada Data untuk Sync',
-        text: 'Semua data sudah tersinkronisasi.',
-        timer: 2000,
-        showConfirmButton: false
+        icon: 'warning',
+        title: 'Offline',
+        text: 'Tidak dapat sync karena tidak ada koneksi internet.',
       });
       return;
     }
     
-    let syncedCount = 0;
-    
-    for (const story of unsyncedStories) {
-      try {
-        // For demo purposes, we'll use guest endpoint
-        // In real app, you'd need to handle authentication and file uploads properly
-        const result = await ApiService.addStoryGuest({
-          description: story.description,
-          photo: story.photo, // This is just filename, you might need to store actual file
-          lat: story.lat,
-          lon: story.lon
+    try {
+      const unsyncedStories = await IndexedDBHelper.getUnsyncedStories();
+      console.log('Unsynced stories found:', unsyncedStories.length);
+      
+      if (unsyncedStories.length === 0) {
+        await Swal.fire({
+          icon: 'info',
+          title: 'Tidak Ada Data untuk Sync',
+          text: 'Semua data sudah tersinkronisasi.',
+          timer: 2000,
+          showConfirmButton: false
+        });
+        return;
+      }
+      
+      let syncedCount = 0;
+      
+      for (const story of unsyncedStories) {
+        try {
+          // For demo purposes, we'll use guest endpoint
+          // In real app, you'd need to handle authentication and file uploads properly
+          const result = await ApiService.addStoryGuest({
+            description: story.description,
+            photo: story.photo, // This is just filename, you might need to store actual file
+            lat: story.lat,
+            lon: story.lon
+          });
+          
+          if (!result.error) {
+            await IndexedDBHelper.markAsSynced(story.id);
+            syncedCount++;
+            console.log('Story synced successfully:', story.id);
+          } else {
+            console.error('Failed to sync story:', story.id, result.message);
+          }
+        } catch (error) {
+          console.error('Error syncing story:', story.id, error);
+        }
+      }
+      
+      if (syncedCount > 0) {
+        await Swal.fire({
+          icon: 'success',
+          title: 'Sync Berhasil',
+          text: `${syncedCount} cerita berhasil disinkronisasi ke server.`,
+          timer: 3000,
+          showConfirmButton: false
         });
         
-        if (!result.error) {
-          await IndexedDBHelper.markAsSynced(story.id);
-          syncedCount++;
-          console.log('Story synced successfully:', story.id);
-        } else {
-          console.error('Failed to sync story:', story.id, result.message);
-        }
-      } catch (error) {
-        console.error('Error syncing story:', story.id, error);
+        // Reload stories to show synced data
+        await this._loadStories();
+      } else {
+        await Swal.fire({
+          icon: 'warning',
+          title: 'Sync Gagal',
+          text: 'Tidak ada cerita yang berhasil disinkronisasi.',
+        });
       }
-    }
-    
-    if (syncedCount > 0) {
-      await Swal.fire({
-        icon: 'success',
-        title: 'Sync Berhasil',
-        text: `${syncedCount} cerita berhasil disinkronisasi ke server.`,
-        timer: 3000,
-        showConfirmButton: false
-      });
       
-      // Reload stories to show synced data
-      await this._loadStories();
-    } else {
+    } catch (error) {
+      console.error('Error during sync:', error);
       await Swal.fire({
-        icon: 'warning',
-        title: 'Sync Gagal',
-        text: 'Tidak ada cerita yang berhasil disinkronisasi.',
+        icon: 'error',
+        title: 'Error Sync',
+        text: 'Terjadi kesalahan saat menyinkronisasi data.',
       });
     }
-    
-  } catch (error) {
-    console.error('Error during sync:', error);
-    await Swal.fire({
-      icon: 'error',
-      title: 'Error Sync',
-      text: 'Terjadi kesalahan saat menyinkronisasi data.',
-    });
   }
-}
-
-constructor() {
-  window.addEventListener("online", () => {
-    console.log("Back online, syncing...");
-    this._syncOfflineStories();
-  });
-}
 
   _renderStories(stories) {
     const storiesList = document.getElementById('stories-list');

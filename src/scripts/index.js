@@ -36,24 +36,35 @@ document.addEventListener('DOMContentLoaded', async () => {
     location.reload();
   });
 
+// ... existing code ...
+
 // Register service worker
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js')
       .then((registration) => {
-        console.log('SW registered: ', registration);
+        console.log('SW registered successfully:', registration);
         
         // Request notification permission
-        if ('Notification' in window && 'serviceWorker' in navigator) {
+        if ('Notification' in window) {
           Notification.requestPermission().then((permission) => {
             if (permission === 'granted') {
               console.log('Notification permission granted');
+            } else {
+              console.log('Notification permission denied or dismissed');
             }
+          }).catch((error) => {
+            console.error('Error requesting notification permission:', error);
           });
         }
+
+        // Listen for messages from service worker
+        navigator.serviceWorker.addEventListener('message', (event) => {
+          console.log('Message from SW:', event.data);
+        });
       })
       .catch((registrationError) => {
-        console.log('SW registration failed: ', registrationError);
+        console.error('SW registration failed:', registrationError);
       });
   });
 }
