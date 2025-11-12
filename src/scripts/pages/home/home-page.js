@@ -1,4 +1,4 @@
-import ApiService from '../../data/api.js';
+import ApiService from '../../data/api.js'; 
 import { showFormattedDate } from '../../utils/index.js';
 import IndexedDBHelper from '../../utils/idb.js';
 import PushNotificationManager from '../../utils/push-notification.js';
@@ -6,6 +6,8 @@ import PushNotificationManager from '../../utils/push-notification.js';
 export default class HomePage {
   constructor() {
     this.pushManager = new PushNotificationManager();
+    this.currentView = 'all'; // 'all' or 'favorites'
+    this.stories = [];
     
     // Auto-sync when coming online
     window.addEventListener("online", () => {
@@ -17,20 +19,41 @@ export default class HomePage {
   async render() {
     return `
       <section class="container">
-        <h1>Cerita Dicoding</h1>
-        <div class="notification-toggle">
-          <label for="notification-toggle">Aktifkan Push Notification:</label>
-          <input type="checkbox" id="notification-toggle">
+        <div class="page-header">
+          <h1>Cerita Dicoding</h1>
+          <div class="header-controls">
+            <div class="notification-toggle">
+              <label for="notification-toggle">
+                <span class="toggle-icon">🔔</span>
+                <input type="checkbox" id="notification-toggle">
+                Push Notification
+              </label>
+            </div>
+          </div>
         </div>
-        <div class="offline-controls">
-          <button id="sync-btn" class="btn-secondary">Sync Offline Data</button>
-          <button id="clear-cache-btn" class="btn-secondary">Clear Cache</button>
+
+        <div class="view-tabs">
+          <button id="view-all-btn" class="tab-btn active" data-view="all">
+            📚 Semua Cerita
+          </button>
+          <button id="view-favorites-btn" class="tab-btn" data-view="favorites">
+            ⭐ Favorit (<span id="favorites-count">0</span>)
+          </button>
         </div>
+
+        <!-- Bagian offline-controls dihapus karena tidak dibutuhkan -->
+
+        <div id="loading-indicator" class="loading-indicator" style="display: none;">
+          <div class="spinner"></div>
+          <p>Memuat cerita...</p>
+        </div>
+
         <div class="content-wrapper" id="content-wrapper" style="display: none;">
           <div class="stories-list" id="stories-list"></div>
           <div class="map-container" id="map" role="application" aria-label="Peta lokasi cerita"></div>
         </div>
-        <a href="#/add-story" class="btn add-story-btn">Tambah Cerita Baru</a>
+
+        <a href="#/add-story" class="btn add-story-btn">➕ Tambah Cerita Baru</a>
       </section>
     `;
   }
@@ -38,136 +61,65 @@ export default class HomePage {
   async afterRender() {
     await this._loadStories();
     this._initMap();
-    this._renderContent();
-    this._initPushToggle();
     this._initNotificationToggle();
-    this._initOfflineControls();
+    this._initOfflineControls(); // tetap dibiarkan agar kode lain tidak rusak
+    this._initViewTabs();
+    await this._updateFavoritesCount();
   }
 
-  _initPushToggle() {
-  const toggle = document.getElementById('push-toggle');
-  if (!toggle) return;
-
-  toggle.checked = localStorage.getItem('push-subscribed') === 'true';
-
-  toggle.addEventListener('change', async (e) => {
-    if (e.target.checked) {
-      const permission = await Notification.requestPermission();
-      if (permission !== 'granted') {
-        Swal.fire('Izin Notifikasi Ditolak ❌');
-        toggle.checked = false;
-        return;
-      }
-
-      const reg = await navigator.serviceWorker.getRegistration();
-      if (reg) {
-        reg.showNotification("Push Notification Aktif ✅", {
-          body: "Anda akan mendapatkan notifikasi cerita baru!",
-          icon: "/icons/icon-192x192.png"
-        });
-      }
-
-      localStorage.setItem('push-subscribed', 'true');
-      Swal.fire('Notifikasi Diaktifkan ✅');
-
-    } else {
-      localStorage.setItem('push-subscribed', 'false');
-      Swal.fire('Notifikasi Dinonaktifkan ⚠️');
-    }
-  });
-}
-
+  _initViewTabs() {
+    const allBtn = document.getElementById('view-all-btn');
+    const favBtn = document.getElementById('view-favorites-btn');
+    
+    allBtn.addEventListener('click', () => {
+      this.currentView = 'all';
+      allBtn.classList.add('active');
+      favBtn.classList.remove('active');
+      this._renderStories(this.stories);
+    });
+    
+    favBtn.addEventListener('click', async () => {
+      this.currentView = 'favorites';
+      favBtn.classList.add('active');
+      allBtn.classList.remove('active');
+      await this._loadFavorites();
+    });
+  }
 
   _initNotificationToggle() {
     const toggle = document.getElementById('notification-toggle');
-    this.pushManager.initToggle(toggle);
+    if (toggle) {
+      this.pushManager.initToggle(toggle);
+    }
   }
 
   _initOfflineControls() {
     const syncBtn = document.getElementById('sync-btn');
     const clearCacheBtn = document.getElementById('clear-cache-btn');
+    const dbStatsBtn = document.getElementById('db-stats-btn');
     
-    syncBtn.addEventListener('click', async () => {
-      await this._syncOfflineStories();
-      await this._loadStories(); // Reload to show synced data
-      await Swal.fire({
-        icon: 'success',
-        title: 'Sync Selesai',
-        text: 'Data offline telah disinkronisasi.',
-        timer: 2000,
-        showConfirmButton: false
+    if (syncBtn) {
+      syncBtn.addEventListener('click', async () => {
+        await this._syncOfflineStories();
+        await this._loadStories();
       });
-    });
+    }
     
-    clearCacheBtn.addEventListener('click', async () => {
-      await this._clearCache();
-    });
-  }
-
-  async _clearCache() {
-    try {
-      const result = await Swal.fire({
-        title: 'Hapus Cache?',
-        text: 'Semua data offline akan dihapus. Tindakan ini tidak dapat dibatalkan.',
-        icon: 'warning',
-        showCancelButton: true,
-        confirmButtonColor: '#d33',
-        cancelButtonColor: '#3085d6',
-        confirmButtonText: 'Ya, Hapus',
-        cancelButtonText: 'Batal'
+    if (clearCacheBtn) {
+      clearCacheBtn.addEventListener('click', async () => {
+        await this._clearCache();
       });
-
-      if (!result.isConfirmed) {
-        return; // User cancelled
-      }
-
-      console.log('Starting cache clear process...');
-      
-      // Clear IndexedDB
-      await IndexedDBHelper.clearAllStories();
-      console.log('IndexedDB cleared');
-      
-      // Clear API cache if using workbox
-      if ('caches' in window) {
-        const cacheNames = await caches.keys();
-        console.log('Available caches:', cacheNames);
-        
-        for (const cacheName of cacheNames) {
-          if (cacheName.includes('story-app') || cacheName.includes('api-cache') || cacheName.includes('stories-cache')) {
-            await caches.delete(cacheName);
-            console.log('Deleted cache:', cacheName);
-          }
-        }
-      }
-      
-      // Reload stories (will show empty or fetch from API)
-      await this._loadStories();
-      
-      await Swal.fire({
-        icon: 'success',
-        title: 'Cache Dibersihkan',
-        text: 'Semua data cache telah dihapus.',
-        timer: 2000,
-        showConfirmButton: false
-      });
-      
-    } catch (error) {
-      console.error('Error clearing cache:', error);
-      await Swal.fire({
-        icon: 'error',
-        title: 'Error',
-        text: `Terjadi kesalahan saat menghapus cache: ${error.message}`,
+    }
+    
+    if (dbStatsBtn) {
+      dbStatsBtn.addEventListener('click', async () => {
+        await this._showDatabaseStats();
       });
     }
   }
 
   async _loadStories() {
-    const loadingIndicator = document.createElement('p');
-    loadingIndicator.id = "loading-indicator";
-    loadingIndicator.textContent = "Memuat cerita...";
-    document.querySelector('.container').prepend(loadingIndicator);
-
-    const contentWrapper = document.getElementById('content-wrapper');
+    this._showLoading(true);
 
     try {
       let stories = [];
@@ -182,24 +134,57 @@ export default class HomePage {
         stories = await IndexedDBHelper.getAllStories();
       }
 
-      this._renderStories(stories);
       this.stories = stories;
-
-      loadingIndicator.style.display = 'none';
-      contentWrapper.style.display = 'grid';
+      this._renderStories(stories);
+      this._showLoading(false);
+      document.getElementById('content-wrapper').style.display = 'grid';
 
     } catch (error) {
       console.error('Error loading stories:', error);
 
       try {
         const cachedStories = await IndexedDBHelper.getAllStories();
-        this._renderStories(cachedStories);
         this.stories = cachedStories;
-        loadingIndicator.style.display = 'none';
-        contentWrapper.style.display = 'grid';
+        this._renderStories(cachedStories);
+        this._showLoading(false);
+        document.getElementById('content-wrapper').style.display = 'grid';
       } catch (cacheError) {
-        loadingIndicator.textContent = 'Gagal memuat cerita. Coba periksa koneksi internet.';
+        this._showLoading(false);
+        await window.Swal.fire({
+          icon: 'error',
+          title: 'Error',
+          text: 'Gagal memuat cerita. Silakan coba lagi.'
+        });
       }
+    }
+  }
+
+  async _loadFavorites() {
+    this._showLoading(true);
+
+    try {
+      const favorites = await IndexedDBHelper.getAllFavorites();
+      this._renderStories(favorites);
+      this._showLoading(false);
+
+      if (favorites.length === 0) {
+        document.getElementById('stories-list').innerHTML = `
+          <div class="empty-state">
+            <p style="text-align: center; color: #999; padding: 2rem;">
+              Belum ada cerita favorit.<br>
+              Klik ⭐ pada cerita untuk menambahkan ke favorit.
+            </p>
+          </div>
+        `;
+      }
+    } catch (error) {
+      console.error('Error loading favorites:', error);
+      this._showLoading(false);
+      await window.Swal.fire({
+        icon: 'error',
+        title: 'Error',
+        text: 'Gagal memuat favorit.'
+      });
     }
   }
 
@@ -208,7 +193,6 @@ export default class HomePage {
       try {
         await IndexedDBHelper.addStory({ ...story, synced: true });
       } catch (error) {
-        // Story might already exist, try update
         try {
           await IndexedDBHelper.updateStory({ ...story, synced: true });
         } catch (updateError) {
@@ -220,20 +204,21 @@ export default class HomePage {
 
   async _syncOfflineStories() {
     if (!navigator.onLine) {
-      await Swal.fire({
+      await window.Swal.fire({
         icon: 'warning',
         title: 'Offline',
         text: 'Tidak dapat sync karena tidak ada koneksi internet.',
+        timer: 2000,
+        showConfirmButton: false
       });
       return;
     }
     
     try {
       const unsyncedStories = await IndexedDBHelper.getUnsyncedStories();
-      console.log('Unsynced stories found:', unsyncedStories.length);
       
       if (unsyncedStories.length === 0) {
-        await Swal.fire({
+        await window.Swal.fire({
           icon: 'info',
           title: 'Tidak Ada Data untuk Sync',
           text: 'Semua data sudah tersinkronisasi.',
@@ -247,11 +232,9 @@ export default class HomePage {
       
       for (const story of unsyncedStories) {
         try {
-          // For demo purposes, we'll use guest endpoint
-          // In real app, you'd need to handle authentication and file uploads properly
           const result = await ApiService.addStoryGuest({
             description: story.description,
-            photo: story.photo, // This is just filename, you might need to store actual file
+            photo: story.photo,
             lat: story.lat,
             lon: story.lon
           });
@@ -259,9 +242,6 @@ export default class HomePage {
           if (!result.error) {
             await IndexedDBHelper.markAsSynced(story.id);
             syncedCount++;
-            console.log('Story synced successfully:', story.id);
-          } else {
-            console.error('Failed to sync story:', story.id, result.message);
           }
         } catch (error) {
           console.error('Error syncing story:', story.id, error);
@@ -269,54 +249,208 @@ export default class HomePage {
       }
       
       if (syncedCount > 0) {
-        await Swal.fire({
+        await window.Swal.fire({
           icon: 'success',
           title: 'Sync Berhasil',
-          text: `${syncedCount} cerita berhasil disinkronisasi ke server.`,
-          timer: 3000,
+          text: `${syncedCount} cerita berhasil disinkronisasi.`,
+          timer: 2000,
           showConfirmButton: false
-        });
-        
-        // Reload stories to show synced data
-        await this._loadStories();
-      } else {
-        await Swal.fire({
-          icon: 'warning',
-          title: 'Sync Gagal',
-          text: 'Tidak ada cerita yang berhasil disinkronisasi.',
         });
       }
       
     } catch (error) {
       console.error('Error during sync:', error);
-      await Swal.fire({
+      await window.Swal.fire({
         icon: 'error',
         title: 'Error Sync',
-        text: 'Terjadi kesalahan saat menyinkronisasi data.',
+        text: 'Terjadi kesalahan saat menyinkronisasi data.'
       });
+    }
+  }
+
+  async _clearCache() {
+    try {
+      const result = await window.Swal.fire({
+        title: 'Hapus Cache?',
+        text: 'Semua data offline akan dihapus. Tindakan ini tidak dapat dibatalkan.',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#d33',
+        cancelButtonColor: '#3085d6',
+        confirmButtonText: 'Ya, Hapus',
+        cancelButtonText: 'Batal'
+      });
+
+      if (!result.isConfirmed) {
+        return;
+      }
+
+      await IndexedDBHelper.clearAllStories();
+      
+      if ('caches' in window) {
+        const cacheNames = await caches.keys();
+        for (const cacheName of cacheNames) {
+          await caches.delete(cacheName);
+        }
+      }
+      
+      await this._loadStories();
+      
+      await window.Swal.fire({
+        icon: 'success',
+        title: 'Cache Dibersihkan',
+        text: 'Semua data cache telah dihapus.',
+        timer: 2000,
+        showConfirmButton: false
+      });
+      
+    } catch (error) {
+      console.error('Error clearing cache:', error);
+      await window.Swal.fire({
+        icon: 'error',
+        title: 'Error',
+        text: `Gagal menghapus cache: ${error.message}`
+      });
+    }
+  }
+
+  async _showDatabaseStats() {
+    try {
+      const stats = await IndexedDBHelper.getDatabaseStats();
+      
+      await window.Swal.fire({
+        title: '📊 Database Statistics',
+        html: `
+          <div style="text-align: left; padding: 1rem;">
+            <p><strong>Total Stories:</strong> ${stats.totalStories}</p>
+            <p><strong>Synced Stories:</strong> ${stats.syncedStories}</p>
+            <p><strong>Unsynced Stories:</strong> ${stats.unsyncedStories}</p>
+            <p><strong>Total Favorites:</strong> ${stats.totalFavorites}</p>
+            <hr style="margin: 1rem 0;">
+            <p style="color: #666; font-size: 0.9rem;">
+              Network: ${navigator.onLine ? '🟢 Online' : '🔴 Offline'}
+            </p>
+          </div>
+        `,
+        icon: 'info'
+      });
+    } catch (error) {
+      console.error('Error showing stats:', error);
     }
   }
 
   _renderStories(stories) {
     const storiesList = document.getElementById('stories-list');
+    
+    if (!stories || stories.length === 0) {
+      storiesList.innerHTML = '<p style="text-align: center; color: #999;">Tidak ada cerita.</p>';
+      return;
+    }
+
     storiesList.innerHTML = stories.map(story => `
       <article class="story-card" data-id="${story.id}">
         <img src="${story.photoUrl}" alt="Foto cerita oleh ${story.name}" loading="lazy">
         <div class="story-content">
-          <h3>${story.name}</h3>
+          <div class="story-header">
+            <h3>${story.name}</h3>
+            <button class="favorite-btn" data-id="${story.id}" aria-label="Toggle favorite">
+              ⭐
+            </button>
+          </div>
           <p>${story.description}</p>
           <time datetime="${story.createdAt}">${showFormattedDate(story.createdAt)}</time>
         </div>
       </article>
     `).join('');
 
-    // Add click event to story cards
+    // Update favorite button states
+    this._updateFavoriteButtons();
+
+    // Add click events
     storiesList.querySelectorAll('.story-card').forEach(card => {
-      card.addEventListener('click', () => {
-        const storyId = card.dataset.id;
-        this._showStoryDetail(storyId);
+      card.addEventListener('click', (e) => {
+        if (!e.target.classList.contains('favorite-btn')) {
+          const storyId = card.dataset.id;
+          this._showStoryDetail(storyId);
+        }
       });
     });
+
+    // Add favorite button events
+    storiesList.querySelectorAll('.favorite-btn').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        await this._toggleFavorite(btn.dataset.id);
+      });
+    });
+
+    this._addMarkersToMap();
+  }
+
+  async _updateFavoriteButtons() {
+    const buttons = document.querySelectorAll('.favorite-btn');
+    for (const btn of buttons) {
+      const isFav = await IndexedDBHelper.isFavorite(btn.dataset.id);
+      btn.classList.toggle('is-favorite', isFav);
+      btn.style.opacity = isFav ? '1' : '0.3';
+    }
+  }
+
+  async _updateFavoritesCount() {
+    try {
+      const favorites = await IndexedDBHelper.getAllFavorites();
+      const countElement = document.getElementById('favorites-count');
+      if (countElement) {
+        countElement.textContent = favorites.length;
+      }
+    } catch (error) {
+      console.error('Error updating favorites count:', error);
+    }
+  }
+
+  async _toggleFavorite(storyId) {
+    try {
+      const isFavorite = await IndexedDBHelper.isFavorite(storyId);
+      const story = this.stories.find(s => s.id === storyId);
+      
+      if (!story) {
+        console.error('Story not found:', storyId);
+        return;
+      }
+      
+      if (isFavorite) {
+        await IndexedDBHelper.removeFromFavorites(storyId);
+        await window.Swal.fire({
+          icon: 'info',
+          title: 'Dihapus dari Favorit',
+          timer: 1500,
+          showConfirmButton: false,
+          position: 'bottom-end',
+          toast: true
+        });
+      } else {
+        await IndexedDBHelper.addToFavorites(story);
+        await window.Swal.fire({
+          icon: 'success',
+          title: 'Ditambahkan ke Favorit',
+          timer: 1500,
+          showConfirmButton: false,
+          position: 'bottom-end',
+          toast: true
+        });
+      }
+      
+      await this._updateFavoriteButtons();
+      await this._updateFavoritesCount();
+      
+    } catch (error) {
+      console.error('Error toggling favorite:', error);
+      await window.Swal.fire({
+        icon: 'error',
+        title: 'Error',
+        text: error.message || 'Gagal mengubah status favorit.'
+      });
+    }
   }
 
   async _showStoryDetail(storyId) {
@@ -324,8 +458,15 @@ export default class HomePage {
       const result = await ApiService.getStoryDetail(storyId);
       if (!result.error) {
         const story = result.story;
-        // Tampilkan modal atau navigasi ke halaman detail
-        alert(`Detail Cerita:\n\nNama: ${story.name}\nDeskripsi: ${story.description}\nTanggal: ${showFormattedDate(story.createdAt)}`);
+        await window.Swal.fire({
+          title: story.name,
+          html: `
+            <img src="${story.photoUrl}" style="width: 100%; max-height: 300px; object-fit: cover; border-radius: 8px; margin-bottom: 1rem;">
+            <p style="text-align: left; margin: 1rem 0;">${story.description}</p>
+            <p style="text-align: left; color: #666; font-size: 0.9rem;">${showFormattedDate(story.createdAt)}</p>
+          `,
+          confirmButtonText: 'Tutup'
+        });
       }
     } catch (error) {
       console.error('Error loading story detail:', error);
@@ -333,6 +474,11 @@ export default class HomePage {
   }
 
   _initMap() {
+    if (typeof L === 'undefined') {
+      console.error('Leaflet not loaded');
+      return;
+    }
+
     const map = L.map('map').setView([-6.2, 106.816666], 10);
     
     const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -340,7 +486,7 @@ export default class HomePage {
     });
 
     const satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-      attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
+      attribution: 'Tiles © Esri'
     });
 
     const baseLayers = {
@@ -353,13 +499,11 @@ export default class HomePage {
 
     this.map = map;
     this.markers = [];
-
-    if (this.stories) {
-      this._addMarkersToMap();
-    }
   }
 
   _addMarkersToMap() {
+    if (!this.map) return;
+
     this.markers.forEach(marker => this.map.removeLayer(marker));
     this.markers = [];
 
@@ -368,10 +512,12 @@ export default class HomePage {
         const marker = L.marker([story.lat, story.lon])
           .addTo(this.map)
           .bindPopup(`
-            <img src="${story.photoUrl}" alt="Foto cerita" style="width: 100px; height: auto;">
-            <h4>${story.name}</h4>
-            <p>${story.description}</p>
-            <small>${showFormattedDate(story.createdAt)}</small>
+            <div style="text-align: center;">
+              <img src="${story.photoUrl}" alt="Foto cerita" style="width: 100px; height: auto; border-radius: 4px; margin-bottom: 0.5rem;">
+              <h4 style="margin: 0.5rem 0;">${story.name}</h4>
+              <p style="margin: 0.25rem 0; font-size: 0.9rem;">${story.description.substring(0, 100)}...</p>
+              <small style="color: #666;">${showFormattedDate(story.createdAt)}</small>
+            </div>
           `);
         
         marker.on('click', () => {
@@ -390,17 +536,14 @@ export default class HomePage {
     const storyCard = document.querySelector(`.story-card[data-id="${storyId}"]`);
     if (storyCard) {
       storyCard.classList.add('highlight');
-      storyCard.scrollIntoView({ behavior: 'smooth' });
+      storyCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
   }
-}
 
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('../../sw.js')  // Ganti dengan path service worker Anda
-    .then(registration => {
-      console.log('Service Worker registered:', registration);
-    })
-    .catch(error => {
-      console.log('Service Worker registration failed:', error);
-    });
+  _showLoading(show) {
+    const loadingIndicator = document.getElementById('loading-indicator');
+    if (loadingIndicator) {
+      loadingIndicator.style.display = show ? 'flex' : 'none';
+    }
+  }
 }

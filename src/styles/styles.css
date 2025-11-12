@@ -716,31 +716,78 @@ header {
 
 /* ... existing styles ... */
 
-.offline-controls {
-  display: flex;
-  gap: 1rem;
-  margin-bottom: 1rem;
-  flex-wrap: wrap;
+/* BUTTONS */
+.add-story-btn {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  padding: 1rem 1.5rem;
+  background: #007bff;
+  color: white;
+  text-decoration: none;
+  border-radius: 50px;
+  box-shadow: 0 4px 12px rgba(0, 123, 255, 0.4);
+  transition: all 0.3s ease;
+  z-index: 998;
+  font-weight: 600;
 }
 
+.add-story-btn:hover {
+  background: #0056b3;
+  transform: translateY(-2px);
+}
+
+/* INSTALL BUTTON */
+.install-btn {
+  position: fixed;
+  bottom: 80px;
+  right: 20px;
+  z-index: 999;
+  padding: 1rem 1.5rem;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  border-radius: 50px;
+  cursor: pointer;
+  font-weight: bold;
+  opacity: 0;
+  transition: all 0.3s ease;
+}
+
+/* NOTIFICATION TOGGLE */
 .notification-toggle {
-  margin-bottom: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
-.status-indicator {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
+.notification-toggle input[type="checkbox"] {
+  width: 40px;
+  height: 20px;
+  appearance: none;
+  background: #ccc;
+  border-radius: 10px;
+  position: relative;
+  cursor: pointer;
+  transition: background 0.3s ease;
+}
+
+.notification-toggle input[type="checkbox"]::before {
+  content: '';
+  position: absolute;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
-  margin-left: 0.5rem;
+  background: white;
+  top: 2px;
+  left: 2px;
+  transition: transform 0.3s ease;
 }
 
-.status-online {
-  background-color: #28a745;
+.notification-toggle input[type="checkbox"]:checked {
+  background: #28a745;
 }
 
-.status-offline {
-  background-color: #dc3545;
+.notification-toggle input[type="checkbox"]:checked::before {
+  transform: translateX(20px);
 }
-
-/* ... existing styles ... */

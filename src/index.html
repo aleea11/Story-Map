@@ -1,61 +1,68 @@
 <!DOCTYPE html>
 <html lang="id">
-  <head>
-    <meta http-equiv="Content-Type" content="text/html;charset=UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <link rel="shortcut icon" href="/favicon.png" />
-    <title>Berbagi Cerita Dicoding</title>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/sweetalert2@11.7.32/dist/sweetalert2.min.css">
-  <!-- ... existing meta tags ... -->
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Berbagi Cerita Dicoding</title>
+  <link rel="shortcut icon" href="/favicon.png" type="image/png" />
+
+  <!-- PWA Manifest & Meta -->
   <link rel="manifest" href="/manifest.json">
   <meta name="theme-color" content="#007bff">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="Story App">
   <link rel="apple-touch-icon" href="/icon-192x192.png">
-  <!-- ... existing links ... -->
 
-<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11.7.32/dist/sweetalert2.min.js"></script>
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 
-<!-- Leaflet JS -->
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <!-- SweetAlert2 CSS -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/sweetalert2@11.7.32/dist/sweetalert2.min.css">
 
-<script type="module" src="/scripts/index.js"></script>
+  <!-- Main App Script (module) -->
+  <script type="module" src="/scripts/index.js"></script>
+</head>
 
-    <!-- Leaflet CSS -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<body>
+  <!-- ===== HEADER ===== -->
+  <header>
+    <div class="main-header container">
+      <a class="brand-name" href="#/">Berbagi Cerita Dicoding</a>
 
-    <script type="module" src="/scripts/index.js"></script>
-  </head>
-  
-  <body>  
-    <header>
-      <div class="main-header container">
-        <a class="brand-name" href="#/">Berbagi Cerita Dicoding</a>
+      <nav id="navigation-drawer" class="navigation-drawer">
+        <ul id="nav-list" class="nav-list">
+          <li><a href="#/">Beranda</a></li>
+          <li><a href="#/add-story">Tambah Cerita</a></li>
+          <li><a href="#/about">Tentang</a></li>
+          <li id="auth-links">
+            <a href="#/login" id="login-link">Login</a>
+            <a href="#/register" id="register-link">Register</a>
+          </li>
+          <li id="logout-link" style="display: none;">
+            <a href="#" id="logout-btn">Logout</a>
+          </li>
+        </ul>
+      </nav>
 
-        <nav id="navigation-drawer" class="navigation-drawer">
-          <ul id="nav-list" class="nav-list">
-            <li><a href="#/">Beranda</a></li>
-            <li><a href="#/add-story">Tambah Cerita</a></li>
-            <li><a href="#/about">Tentang</a></li>
-            <li id="auth-links">
-              <a href="#/login" id="login-link">Login</a>
-              <a href="#/register" id="register-link">Register</a>
-            </li>
-            <li id="logout-link" style="display: none;">
-              <a href="#" id="logout-btn">Logout</a>
-            </li>
-          </ul>
-        </nav>
+      <button id="drawer-button" class="drawer-button" aria-label="Toggle navigation menu">☰</button>
+    </div>
+  </header>
 
-        <button id="drawer-button" class="drawer-button" aria-label="Toggle navigation menu">☰</button>
-      </div>
-    </header>
+  <!-- ===== MAIN CONTENT ===== -->
+  <main id="main-content" class="main-content"></main>
 
-    <main id="main-content" class="main-content"></main>
+  <!-- ===== INSTALL BUTTON ===== -->
+  <button id="install-btn" class="btn install-btn" 
+    style="display: none; position: fixed; bottom: 20px; right: 20px; z-index: 1000;">
+    Install App
+  </button>
 
-    <!-- Leaflet JS -->
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  </body>
+  <!-- ===== SCRIPTS ===== -->
+  <!-- SweetAlert2 JS -->
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11.7.32/dist/sweetalert2.min.js"></script>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+</body>
 </html>

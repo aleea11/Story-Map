@@ -3,195 +3,331 @@ import '../styles/styles.css';
 
 import App from './pages/app';
 
+// Initialize app
 document.addEventListener('DOMContentLoaded', async () => {
   const app = new App({
     content: document.querySelector('#main-content'),
     drawerButton: document.querySelector('#drawer-button'),
     navigationDrawer: document.querySelector('#navigation-drawer'),
   });
+  
   await app.renderPage();
 
   window.addEventListener('hashchange', async () => {
     await app.renderPage();
   });
+
+  // Handle authentication UI
+  updateAuthUI();
+  
+  // Setup logout button
+  const logoutBtn = document.getElementById('logout-btn');
+  if (logoutBtn) {
+    logoutBtn.addEventListener('click', handleLogout);
+  }
 });
 
-// Handle authentication UI
+// Update auth UI based on login status
+function updateAuthUI() {
   const token = localStorage.getItem('token');
   const authLinks = document.getElementById('auth-links');
   const logoutLink = document.getElementById('logout-link');
-  const logoutBtn = document.getElementById('logout-btn');
+  
   if (token) {
-    authLinks.style.display = 'none';
-    logoutLink.style.display = 'block';
+    if (authLinks) authLinks.style.display = 'none';
+    if (logoutLink) logoutLink.style.display = 'block';
   } else {
-    authLinks.style.display = 'block';
-    logoutLink.style.display = 'none';
+    if (authLinks) authLinks.style.display = 'block';
+    if (logoutLink) logoutLink.style.display = 'none';
   }
-  logoutBtn.addEventListener('click', (e) => {
-    e.preventDefault();
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    window.location.hash = '#/';
-    location.reload();
-  });
+}
 
-// ... existing code ...
+// Handle logout
+function handleLogout(e) {
+  e.preventDefault();
+  localStorage.removeItem('token');
+  localStorage.removeItem('user');
+  window.location.hash = '#/';
+  location.reload();
+}
 
-// Register service worker
+// ============================================
+// SERVICE WORKER REGISTRATION
+// ============================================
+
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js')
-      .then((registration) => {
-        console.log('SW registered successfully:', registration);
-        
-        // Request notification permission
-        if ('Notification' in window) {
-          Notification.requestPermission().then((permission) => {
-            if (permission === 'granted') {
-              console.log('Notification permission granted');
-            } else {
-              console.log('Notification permission denied or dismissed');
-            }
-          }).catch((error) => {
-            console.error('Error requesting notification permission:', error);
-          });
-        }
-
-        // Listen for messages from service worker
-        navigator.serviceWorker.addEventListener('message', (event) => {
-          console.log('Message from SW:', event.data);
-        });
-      })
-      .catch((registrationError) => {
-        console.error('SW registration failed:', registrationError);
+  window.addEventListener('load', async () => {
+    try {
+      // Register service worker
+      const registration = await navigator.serviceWorker.register('/sw.js', {
+        scope: '/'
       });
+      
+      console.log('✅ Service Worker registered successfully:', registration.scope);
+      
+      // Handle updates
+      registration.addEventListener('updatefound', () => {
+        const newWorker = registration.installing;
+        console.log('🔄 Service Worker update found');
+        
+        newWorker.addEventListener('statechange', () => {
+          if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+            console.log('✨ New Service Worker available');
+            // Optionally show update notification
+            showUpdateNotification();
+          }
+        });
+      });
+      
+      // Request notification permission after SW is ready
+      if ('Notification' in window && Notification.permission === 'default') {
+        setTimeout(() => {
+          requestNotificationPermission();
+        }, 3000); // Wait 3 seconds before asking
+      }
+      
+      // Listen for messages from service worker
+      navigator.serviceWorker.addEventListener('message', handleSWMessage);
+      
+    } catch (error) {
+      console.error('❌ Service Worker registration failed:', error);
+    }
   });
 }
 
-// ... existing code ...
+// Handle messages from service worker
+function handleSWMessage(event) {
+  console.log('📨 Message from Service Worker:', event.data);
+  
+  const { type, count } = event.data;
+  
+  if (type === 'SYNC_COMPLETE') {
+    if (window.Swal) {
+      window.Swal.fire({
+        icon: 'success',
+        title: 'Sync Selesai',
+        text: `${count} cerita berhasil disinkronisasi`,
+        timer: 2000,
+        showConfirmButton: false
+      });
+    }
+  }
+}
 
-// PWA Install Prompt
+// Request notification permission
+async function requestNotificationPermission() {
+  if (!('Notification' in window)) {
+    console.log('Browser tidak mendukung notifikasi');
+    return;
+  }
+  
+  const permission = Notification.permission;
+  
+  if (permission === 'default') {
+    if (window.Swal) {
+      const result = await window.Swal.fire({
+        title: 'Aktifkan Notifikasi?',
+        text: 'Dapatkan pemberitahuan ketika ada cerita baru!',
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: 'Ya, Aktifkan',
+        cancelButtonText: 'Nanti Saja'
+      });
+      
+      if (result.isConfirmed) {
+        const newPermission = await Notification.requestPermission();
+        if (newPermission === 'granted') {
+          window.Swal.fire({
+            icon: 'success',
+            title: 'Notifikasi Diaktifkan!',
+            text: 'Anda akan mendapat pemberitahuan cerita baru.',
+            timer: 2000,
+            showConfirmButton: false
+          });
+        }
+      }
+    }
+  }
+}
+
+// Show update notification
+function showUpdateNotification() {
+  if (window.Swal) {
+    window.Swal.fire({
+      title: 'Update Tersedia',
+      text: 'Versi baru aplikasi tersedia. Muat ulang untuk update?',
+      icon: 'info',
+      showCancelButton: true,
+      confirmButtonText: 'Muat Ulang',
+      cancelButtonText: 'Nanti'
+    }).then((result) => {
+      if (result.isConfirmed) {
+        window.location.reload();
+      }
+    });
+  }
+}
+
+// ============================================
+// PWA INSTALL PROMPT
+// ============================================
+
 let deferredPrompt = null;
 
+// Show install button
 function showInstallButton() {
-  if (document.getElementById('install-btn')) return; // prevent duplicate button
+  // Check if button already exists
+  if (document.getElementById('install-btn')) {
+    return;
+  }
   
   const installBtn = document.createElement('button');
   installBtn.id = 'install-btn';
   installBtn.className = 'btn install-btn';
-  installBtn.textContent = 'Install App';
-
+  installBtn.textContent = '📱 Install App';
+  installBtn.setAttribute('aria-label', 'Install aplikasi ke perangkat');
+  
   installBtn.addEventListener('click', async () => {
-    if (deferredPrompt) {
-      deferredPrompt.prompt();
-      const { outcome } = await deferredPrompt.userChoice;
-      console.log(`User response: ${outcome}`);
-      deferredPrompt = null;
-      hideInstallButton();
+    if (!deferredPrompt) {
+      console.log('No deferred prompt available');
+      return;
     }
+    
+    // Show install prompt
+    deferredPrompt.prompt();
+    
+    // Wait for user response
+    const { outcome } = await deferredPrompt.userChoice;
+    console.log(`User response: ${outcome}`);
+    
+    if (outcome === 'accepted') {
+      console.log('User accepted installation');
+      if (window.Swal) {
+        window.Swal.fire({
+          icon: 'success',
+          title: 'Aplikasi Terinstall!',
+          text: 'Aplikasi berhasil ditambahkan ke home screen.',
+          timer: 2000,
+          showConfirmButton: false
+        });
+      }
+    }
+    
+    // Clear deferred prompt
+    deferredPrompt = null;
+    hideInstallButton();
   });
-
+  
+  // Add to page
   document.body.appendChild(installBtn);
+  
+  // Animate in
+  setTimeout(() => {
+    installBtn.style.opacity = '1';
+    installBtn.style.transform = 'translateY(0)';
+  }, 100);
 }
 
+// Hide install button
 function hideInstallButton() {
   const installBtn = document.getElementById('install-btn');
   if (installBtn) {
-    installBtn.remove();
+    installBtn.style.opacity = '0';
+    installBtn.style.transform = 'translateY(20px)';
+    setTimeout(() => {
+      installBtn.remove();
+    }, 300);
   }
 }
 
+// Listen for install prompt
 window.addEventListener('beforeinstallprompt', (e) => {
+  // Prevent default mini-infobar
   e.preventDefault();
-  console.log('beforeinstallprompt fired');
+  
+  console.log('📱 beforeinstallprompt fired');
+  
+  // Store event for later use
   deferredPrompt = e;
+  
+  // Show install button
   showInstallButton();
 });
 
+// Listen for app installed
 window.addEventListener('appinstalled', () => {
-  console.log('App installed!');
+  console.log('✅ App installed successfully');
+  
+  // Clear deferred prompt
   deferredPrompt = null;
+  
+  // Hide install button
   hideInstallButton();
+  
+  // Show success message
+  if (window.Swal) {
+    window.Swal.fire({
+      icon: 'success',
+      title: 'Terima Kasih!',
+      text: 'Aplikasi berhasil diinstall di perangkat Anda.',
+      timer: 2000,
+      showConfirmButton: false
+    });
+  }
+  
+  // Track installation (optional analytics)
+  console.log('PWA installation completed');
 });
 
-// ==========================
-// Push Notification Handler
-// ==========================
-const notifyBtn = document.getElementById('push-toggle');
-
-if (notifyBtn) {
-  notifyBtn.addEventListener('click', async () => {
-    if (!('Notification' in window)) {
-      Swal.fire('Browser tidak mendukung notifikasi');
-      return;
-    }
-
-    const permission = await Notification.requestPermission();
-
-    if (permission === 'granted') {
-      const reg = await navigator.serviceWorker.getRegistration();
-      if (reg) {
-        reg.showNotification("Notifikasi Aktif ✅", {
-          body: "Push Notification berhasil diaktifkan!",
-          icon: "/icons/icon-192x192.png",
-          vibrate: [200, 100, 200],
-        });
-      }
-
-      Swal.fire({
-        icon: 'success',
-        title: 'Notifikasi Diaktifkan ✅',
-        timer: 2000,
-        showConfirmButton: false
-      });
-    } else {
-      Swal.fire({
-        icon: 'warning',
-        title: 'Izin Notifikasi Ditolak ❌',
-        text: 'Anda dapat mengaktifkannya di pengaturan browser.'
-      });
-    }
-  });
-
-  // ✅ Push Notification Toggle
-function initPushToggle() {
-  const toggle = document.getElementById('push-toggle');
-  if (!toggle) return;
-
-  // Restore state
-  const isSubscribed = localStorage.getItem('push-subscribed') === 'true';
-  toggle.checked = isSubscribed;
-
-  toggle.addEventListener('change', async (e) => {
-    if (e.target.checked) {
-      // Request permission
-      const permission = await Notification.requestPermission();
-      if (permission !== 'granted') {
-        Swal.fire('Izin Notifikasi Ditolak ❌');
-        toggle.checked = false;
-        return;
-      }
-
-      const reg = await navigator.serviceWorker.getRegistration();
-      if (reg) {
-        reg.showNotification("Push Notification Aktif ✅", {
-          body: "Anda akan mendapatkan notifikasi cerita baru!",
-          icon: "/icons/icon-192x192.png"
-        });
-      }
-
-      localStorage.setItem('push-subscribed', 'true');
-      Swal.fire('Notifikasi Diaktifkan ✅');
-
-    } else {
-      localStorage.setItem('push-subscribed', 'false');
-      Swal.fire('Notifikasi Dinonaktifkan ⚠️');
-    }
-  });
+// Detect if app is running in standalone mode
+if (window.matchMedia('(display-mode: standalone)').matches) {
+  console.log('🚀 App running in standalone mode');
 }
 
-window.addEventListener('DOMContentLoaded', initPushToggle);
-window.addEventListener('hashchange', initPushToggle);
+// ============================================
+// NETWORK STATUS MONITORING
+// ============================================
 
-}
+window.addEventListener('online', () => {
+  console.log('🌐 Back online');
+  
+  if (window.Swal) {
+    window.Swal.fire({
+      icon: 'success',
+      title: 'Kembali Online',
+      text: 'Koneksi internet tersambung kembali.',
+      timer: 2000,
+      showConfirmButton: false,
+      position: 'bottom-end',
+      toast: true
+    });
+  }
+  
+  // Trigger sync
+  if ('serviceWorker' in navigator && 'sync' in registration) {
+    navigator.serviceWorker.ready.then((registration) => {
+      return registration.sync.register('sync-stories');
+    }).catch((error) => {
+      console.error('Background sync registration failed:', error);
+    });
+  }
+});
+
+window.addEventListener('offline', () => {
+  console.log('📴 Gone offline');
+  
+  if (window.Swal) {
+    window.Swal.fire({
+      icon: 'warning',
+      title: 'Sedang Offline',
+      text: 'Beberapa fitur mungkin tidak tersedia.',
+      timer: 2000,
+      showConfirmButton: false,
+      position: 'bottom-end',
+      toast: true
+    });
+  }
+});
+
+// Log initial network status
+console.log(`Network status: ${navigator.onLine ? 'Online' : 'Offline'}`);
