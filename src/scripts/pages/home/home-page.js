@@ -20,7 +20,7 @@ export default class HomePage {
     return `
       <section class="container">
         <div class="page-header">
-          <h1>Cerita Dicoding</h1>
+          <h1>📖 Cerita Dicoding</h1>
           <div class="header-controls">
             <div class="notification-toggle">
               <label for="notification-toggle">
@@ -41,7 +41,15 @@ export default class HomePage {
           </button>
         </div>
 
-        <!-- Bagian offline-controls dihapus karena tidak dibutuhkan -->
+        <!-- Database Stats Button -->
+        <div style="margin: 1rem 0; display: flex; gap: 1rem;">
+          <button id="db-stats-btn" class="btn-secondary">
+            📊 Statistik Database
+          </button>
+          <button id="clear-favorites-btn" class="btn-secondary" style="background: #dc3545;">
+            🗑️ Hapus Semua Favorit
+          </button>
+        </div>
 
         <div id="loading-indicator" class="loading-indicator" style="display: none;">
           <div class="spinner"></div>
@@ -62,15 +70,9 @@ export default class HomePage {
     await this._loadStories();
     this._initMap();
     this._initNotificationToggle();
-    this._initOfflineControls(); // tetap dibiarkan agar kode lain tidak rusak
     this._initViewTabs();
+    this._initDatabaseControls();
     await this._updateFavoritesCount();
-    
-    // Jalankan cek cerita baru setiap 1 menit
-   setInterval(() => {
-   this.pushManager.checkNewStories();
-   }, 60000);
-
   }
 
   _initViewTabs() {
@@ -99,27 +101,19 @@ export default class HomePage {
     }
   }
 
-  _initOfflineControls() {
-    const syncBtn = document.getElementById('sync-btn');
-    const clearCacheBtn = document.getElementById('clear-cache-btn');
-    const dbStatsBtn = document.getElementById('db-stats-btn');
+  _initDatabaseControls() {
+    const statsBtn = document.getElementById('db-stats-btn');
+    const clearBtn = document.getElementById('clear-favorites-btn');
     
-    if (syncBtn) {
-      syncBtn.addEventListener('click', async () => {
-        await this._syncOfflineStories();
-        await this._loadStories();
-      });
-    }
-    
-    if (clearCacheBtn) {
-      clearCacheBtn.addEventListener('click', async () => {
-        await this._clearCache();
-      });
-    }
-    
-    if (dbStatsBtn) {
-      dbStatsBtn.addEventListener('click', async () => {
+    if (statsBtn) {
+      statsBtn.addEventListener('click', async () => {
         await this._showDatabaseStats();
+      });
+    }
+    
+    if (clearBtn) {
+      clearBtn.addEventListener('click', async () => {
+        await this._clearAllFavorites();
       });
     }
   }
@@ -138,6 +132,14 @@ export default class HomePage {
         }
       } else {
         stories = await IndexedDBHelper.getAllStories();
+        
+        if (stories.length === 0) {
+          await window.Swal.fire({
+            icon: 'warning',
+            title: 'Offline',
+            text: 'Anda sedang offline dan belum ada data tersimpan.'
+          });
+        }
       }
 
       this.stories = stories;
@@ -174,26 +176,25 @@ export default class HomePage {
       this._showLoading(false);
 
       if (favorites.length === 0) {
-  document.getElementById('stories-list').innerHTML = `
-    <div class="empty-state">
-      <p style="text-align: center; color: #999; padding: 2rem;">
-        Belum ada cerita favorit.<br>
-        Klik ⭐ pada cerita untuk menambahkan ke favorit.
-      </p>
-    </div>
-  `;
-} else {
-  // Tambahkan event hapus langsung di halaman favorit
-  document.querySelectorAll('.favorite-btn').forEach(btn => {
-    btn.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      await IndexedDBHelper.removeFromFavorites(btn.dataset.id);
-      await this._loadFavorites();
-      await this._updateFavoritesCount();
-    });
-  });
-}
-
+        document.getElementById('stories-list').innerHTML = `
+          <div class="empty-state">
+            <div>⭐</div>
+            <h3>Belum Ada Favorit</h3>
+            <p style="text-align: center; color: #999; padding: 2rem;">
+              Klik tombol <strong>⭐</strong> pada cerita untuk menambahkannya ke favorit.<br>
+              Data favorit akan tersimpan di <strong>IndexedDB</strong> browser Anda.
+            </p>
+          </div>
+        `;
+      } else {
+        // Event listener untuk hapus dari favorit
+        document.querySelectorAll('.remove-favorite-btn').forEach(btn => {
+          btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            await this._removeFromFavorites(btn.dataset.id);
+          });
+        });
+      }
 
     } catch (error) {
       console.error('Error loading favorites:', error);
@@ -201,7 +202,7 @@ export default class HomePage {
       await window.Swal.fire({
         icon: 'error',
         title: 'Error',
-        text: 'Gagal memuat favorit.'
+        text: 'Gagal memuat favorit dari IndexedDB.'
       });
     }
   }
@@ -236,13 +237,6 @@ export default class HomePage {
       const unsyncedStories = await IndexedDBHelper.getUnsyncedStories();
       
       if (unsyncedStories.length === 0) {
-        await window.Swal.fire({
-          icon: 'info',
-          title: 'Tidak Ada Data untuk Sync',
-          text: 'Semua data sudah tersinkronisasi.',
-          timer: 2000,
-          showConfirmButton: false
-        });
         return;
       }
       
@@ -278,57 +272,6 @@ export default class HomePage {
       
     } catch (error) {
       console.error('Error during sync:', error);
-      await window.Swal.fire({
-        icon: 'error',
-        title: 'Error Sync',
-        text: 'Terjadi kesalahan saat menyinkronisasi data.'
-      });
-    }
-  }
-
-  async _clearCache() {
-    try {
-      const result = await window.Swal.fire({
-        title: 'Hapus Cache?',
-        text: 'Semua data offline akan dihapus. Tindakan ini tidak dapat dibatalkan.',
-        icon: 'warning',
-        showCancelButton: true,
-        confirmButtonColor: '#d33',
-        cancelButtonColor: '#3085d6',
-        confirmButtonText: 'Ya, Hapus',
-        cancelButtonText: 'Batal'
-      });
-
-      if (!result.isConfirmed) {
-        return;
-      }
-
-      await IndexedDBHelper.clearAllStories();
-      
-      if ('caches' in window) {
-        const cacheNames = await caches.keys();
-        for (const cacheName of cacheNames) {
-          await caches.delete(cacheName);
-        }
-      }
-      
-      await this._loadStories();
-      
-      await window.Swal.fire({
-        icon: 'success',
-        title: 'Cache Dibersihkan',
-        text: 'Semua data cache telah dihapus.',
-        timer: 2000,
-        showConfirmButton: false
-      });
-      
-    } catch (error) {
-      console.error('Error clearing cache:', error);
-      await window.Swal.fire({
-        icon: 'error',
-        title: 'Error',
-        text: `Gagal menghapus cache: ${error.message}`
-      });
     }
   }
 
@@ -337,23 +280,83 @@ export default class HomePage {
       const stats = await IndexedDBHelper.getDatabaseStats();
       
       await window.Swal.fire({
-        title: '📊 Database Statistics',
+        title: '📊 Statistik IndexedDB',
         html: `
           <div style="text-align: left; padding: 1rem;">
-            <p><strong>Total Stories:</strong> ${stats.totalStories}</p>
-            <p><strong>Synced Stories:</strong> ${stats.syncedStories}</p>
-            <p><strong>Unsynced Stories:</strong> ${stats.unsyncedStories}</p>
-            <p><strong>Total Favorites:</strong> ${stats.totalFavorites}</p>
+            <h3 style="margin-bottom: 1rem;">📦 Database: StoryAppDB</h3>
+            
+            <p><strong>📚 Total Stories (Cache):</strong> ${stats.totalStories}</p>
+            <p><strong>✅ Synced:</strong> ${stats.syncedStories}</p>
+            <p><strong>⏳ Unsynced:</strong> ${stats.unsyncedStories}</p>
+            
             <hr style="margin: 1rem 0;">
+            
+            <p><strong>⭐ Total Favorit:</strong> ${stats.totalFavorites}</p>
+            
+            <hr style="margin: 1rem 0;">
+            
             <p style="color: #666; font-size: 0.9rem;">
-              Network: ${navigator.onLine ? '🟢 Online' : '🔴 Offline'}
+              <strong>Koneksi:</strong> ${navigator.onLine ? '🟢 Online' : '🔴 Offline'}
+            </p>
+            
+            <p style="color: #999; font-size: 0.8rem; margin-top: 1rem;">
+              Data disimpan di IndexedDB browser Anda secara lokal.
             </p>
           </div>
         `,
-        icon: 'info'
+        icon: 'info',
+        confirmButtonText: 'Tutup'
       });
     } catch (error) {
       console.error('Error showing stats:', error);
+      await window.Swal.fire({
+        icon: 'error',
+        title: 'Error',
+        text: 'Gagal memuat statistik database.'
+      });
+    }
+  }
+
+  async _clearAllFavorites() {
+    try {
+      const result = await window.Swal.fire({
+        title: '⚠️ Hapus Semua Favorit?',
+        text: 'Semua cerita favorit akan dihapus dari IndexedDB. Tindakan ini tidak dapat dibatalkan.',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#d33',
+        cancelButtonColor: '#3085d6',
+        confirmButtonText: 'Ya, Hapus Semua',
+        cancelButtonText: 'Batal'
+      });
+
+      if (!result.isConfirmed) {
+        return;
+      }
+
+      await IndexedDBHelper.clearAllFavorites();
+      
+      await window.Swal.fire({
+        icon: 'success',
+        title: 'Favorit Dihapus',
+        text: 'Semua data favorit telah dihapus dari IndexedDB.',
+        timer: 2000,
+        showConfirmButton: false
+      });
+      
+      // Refresh tampilan
+      if (this.currentView === 'favorites') {
+        await this._loadFavorites();
+      }
+      await this._updateFavoritesCount();
+      
+    } catch (error) {
+      console.error('Error clearing favorites:', error);
+      await window.Swal.fire({
+        icon: 'error',
+        title: 'Error',
+        text: 'Gagal menghapus favorit.'
+      });
     }
   }
 
@@ -365,7 +368,6 @@ export default class HomePage {
       return;
     }
 
-    // Different rendering for favorites view
     const isFavoritesView = this.currentView === 'favorites';
 
     storiesList.innerHTML = stories.map(story => `
@@ -375,11 +377,11 @@ export default class HomePage {
           <div class="story-header">
             <h3>${story.name}</h3>
             <div class="story-actions">
-              <button class="favorite-btn" data-id="${story.id}" aria-label="Toggle favorite">
+              <button class="favorite-btn" data-id="${story.id}" aria-label="Toggle favorite" title="Tambah/Hapus Favorit">
                 ⭐
               </button>
               ${isFavoritesView ? `
-                <button class="remove-favorite-btn" data-id="${story.id}" aria-label="Hapus dari favorit" title="Hapus dari favorit">
+                <button class="remove-favorite-btn" data-id="${story.id}" aria-label="Hapus dari favorit" title="Hapus dari IndexedDB">
                   🗑️
                 </button>
               ` : ''}
@@ -391,10 +393,9 @@ export default class HomePage {
       </article>
     `).join('');
 
-    // Update favorite button states
     this._updateFavoriteButtons();
 
-    // Add click events for story cards
+    // Story card click events
     storiesList.querySelectorAll('.story-card').forEach(card => {
       card.addEventListener('click', (e) => {
         if (!e.target.classList.contains('favorite-btn') && 
@@ -405,7 +406,7 @@ export default class HomePage {
       });
     });
 
-    // Add favorite button events
+    // Favorite button events
     storiesList.querySelectorAll('.favorite-btn').forEach(btn => {
       btn.addEventListener('click', async (e) => {
         e.stopPropagation();
@@ -413,9 +414,7 @@ export default class HomePage {
       });
     });
 
-    
-
-    // Add remove from favorites button events (hanya di view favorit)
+    // Remove favorite button events
     if (isFavoritesView) {
       storiesList.querySelectorAll('.remove-favorite-btn').forEach(btn => {
         btn.addEventListener('click', async (e) => {
@@ -434,6 +433,7 @@ export default class HomePage {
       const isFav = await IndexedDBHelper.isFavorite(btn.dataset.id);
       btn.classList.toggle('is-favorite', isFav);
       btn.style.opacity = isFav ? '1' : '0.3';
+      btn.title = isFav ? 'Hapus dari Favorit' : 'Tambah ke Favorit';
     }
   }
 
@@ -460,20 +460,24 @@ export default class HomePage {
       }
       
       if (isFavorite) {
+        // HAPUS dari IndexedDB
         await IndexedDBHelper.removeFromFavorites(storyId);
         await window.Swal.fire({
           icon: 'info',
-          title: 'Dihapus dari Favorit',
+          title: '❌ Dihapus dari Favorit',
+          text: 'Cerita dihapus dari IndexedDB.',
           timer: 1500,
           showConfirmButton: false,
           position: 'bottom-end',
           toast: true
         });
       } else {
+        // TAMBAH ke IndexedDB
         await IndexedDBHelper.addToFavorites(story);
         await window.Swal.fire({
           icon: 'success',
-          title: 'Ditambahkan ke Favorit',
+          title: '✅ Ditambahkan ke Favorit',
+          text: 'Cerita disimpan di IndexedDB browser.',
           timer: 1500,
           showConfirmButton: false,
           position: 'bottom-end',
@@ -489,16 +493,16 @@ export default class HomePage {
       await window.Swal.fire({
         icon: 'error',
         title: 'Error',
-        text: error.message || 'Gagal mengubah status favorit.'
+        text: 'Gagal mengubah status favorit di IndexedDB.'
       });
     }
   }
 
-    async _removeFromFavorites(storyId) {
+  async _removeFromFavorites(storyId) {
     try {
       const confirmDelete = await window.Swal.fire({
-        title: 'Hapus dari Favorit?',
-        text: 'Cerita ini akan dihapus dari daftar favorit.',
+        title: '🗑️ Hapus dari Favorit?',
+        text: 'Cerita ini akan dihapus dari IndexedDB.',
         icon: 'warning',
         showCancelButton: true,
         confirmButtonColor: '#d33',
@@ -514,14 +518,13 @@ export default class HomePage {
       await window.Swal.fire({
         icon: 'success',
         title: 'Berhasil Dihapus',
-        text: 'Cerita telah dihapus dari favorit.',
+        text: 'Cerita telah dihapus dari IndexedDB.',
         timer: 1500,
         showConfirmButton: false,
         position: 'bottom-end',
         toast: true
       });
 
-      // Refresh tampilan & jumlah favorit
       await this._loadFavorites();
       await this._updateFavoritesCount();
 
@@ -530,12 +533,10 @@ export default class HomePage {
       await window.Swal.fire({
         icon: 'error',
         title: 'Gagal Menghapus',
-        text: error.message || 'Terjadi kesalahan saat menghapus favorit.'
+        text: 'Terjadi kesalahan saat menghapus dari IndexedDB.'
       });
     }
   }
-
-
 
   async _showStoryDetail(storyId) {
     try {
@@ -565,21 +566,9 @@ export default class HomePage {
 
     const map = L.map('map').setView([-6.2, 106.816666], 10);
     
-    const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '© OpenStreetMap contributors'
-    });
-
-    const satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-      attribution: 'Tiles © Esri'
-    });
-
-    const baseLayers = {
-      "OpenStreetMap": osmLayer,
-      "Satellite": satelliteLayer
-    };
-
-    L.control.layers(baseLayers).addTo(map);
-    osmLayer.addTo(map);
+    }).addTo(map);
 
     this.map = map;
     this.markers = [];

@@ -1,85 +1,178 @@
 import ApiService from '../data/api.js';
-import IndexedDBHelper from './idb.js';
+
+// VAPID Public Key dari API Dicoding Story
+const VAPID_PUBLIC_KEY = 'BN7-r0Svv7CsTi18-OPYtJLVW0bfuZ1x1UhyhHsQCIqKu543pM8sK5EPTYaFmNt3S-7dVbPVGK34jF6LVXzH9Xo';
 
 class PushNotificationManager {
   constructor() {
     this.isEnabled = false;
-    this.latestStoryId = null;
+    this.subscription = null;
   }
 
   /**
    * Inisialisasi toggle untuk push notification
    */
-  initToggle(toggleElement) {
-    // Ambil status sebelumnya dari localStorage
-    this.isEnabled = localStorage.getItem('pushEnabled') === 'true';
+  async initToggle(toggleElement) {
+    // Cek status permission & subscription
+    const permission = Notification.permission;
+    const subscription = await this._getSubscription();
+    
+    this.isEnabled = (permission === 'granted' && subscription !== null);
     toggleElement.checked = this.isEnabled;
 
     toggleElement.addEventListener('change', async (e) => {
       if (e.target.checked) {
-        const permission = await Notification.requestPermission();
-        if (permission === 'granted') {
-          this.isEnabled = true;
-          localStorage.setItem('pushEnabled', 'true');
-          this._showNotification('Push Notification diaktifkan!', 'Kamu akan mendapat notifikasi cerita baru.');
-        } else {
-          toggleElement.checked = false;
-          this.isEnabled = false;
-          localStorage.setItem('pushEnabled', 'false');
-          alert('Izin notifikasi ditolak oleh pengguna.');
-        }
+        await this._enableNotifications();
+        toggleElement.checked = this.isEnabled;
       } else {
-        this.isEnabled = false;
-        localStorage.setItem('pushEnabled', 'false');
-        this._showNotification('Push Notification dimatikan', 'Kamu tidak akan mendapat notifikasi lagi.');
+        await this._disableNotifications();
+        toggleElement.checked = this.isEnabled;
       }
     });
   }
 
   /**
-   * Mengecek apakah ada cerita baru (dijalankan setiap 1 menit di HomePage)
+   * Aktifkan push notifications
    */
-  async checkNewStories() {
-    if (!this.isEnabled || Notification.permission !== 'granted') return;
-
+  async _enableNotifications() {
     try {
-      const result = await ApiService.getStories({ location: 1 });
-      if (!result.error && result.listStory.length > 0) {
-        const latestStory = result.listStory[0];
-
-        // Bandingkan ID terakhir
-        if (this.latestStoryId && latestStory.id !== this.latestStoryId) {
-          this._showNotification(
-            'Cerita Baru dari Dicoding!',
-            `${latestStory.name} baru saja membagikan cerita: "${latestStory.description.slice(0, 40)}..."`,
-            latestStory.photoUrl
-          );
-        }
-
-        // Simpan ID terbaru
-        this.latestStoryId = latestStory.id;
-        await IndexedDBHelper.addStory({ ...latestStory, synced: true });
+      // 1. Request permission
+      const permission = await Notification.requestPermission();
+      
+      if (permission !== 'granted') {
+        await Swal.fire({
+          icon: 'warning',
+          title: 'Izin Ditolak',
+          text: 'Anda perlu mengizinkan notifikasi dari browser.',
+        });
+        this.isEnabled = false;
+        return;
       }
+
+      // 2. Register service worker jika belum
+      const registration = await navigator.serviceWorker.ready;
+
+      // 3. Subscribe dengan VAPID key
+      const subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: this._urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
+      });
+
+      this.subscription = subscription;
+
+      // 4. Kirim subscription ke server
+      const subscriptionData = {
+        endpoint: subscription.endpoint,
+        keys: {
+          p256dh: this._arrayBufferToBase64(subscription.getKey('p256dh')),
+          auth: this._arrayBufferToBase64(subscription.getKey('auth'))
+        }
+      };
+
+      const result = await ApiService.subscribeNotification(subscriptionData);
+
+      if (!result.error) {
+        this.isEnabled = true;
+        
+        await Swal.fire({
+          icon: 'success',
+          title: 'Notifikasi Aktif!',
+          text: 'Anda akan menerima notifikasi untuk cerita baru.',
+          timer: 2000,
+          showConfirmButton: false
+        });
+      } else {
+        throw new Error(result.message || 'Gagal subscribe');
+      }
+
     } catch (error) {
-      console.error('Gagal memeriksa cerita baru:', error);
+      console.error('Error enabling notifications:', error);
+      this.isEnabled = false;
+      
+      await Swal.fire({
+        icon: 'error',
+        title: 'Gagal Mengaktifkan Notifikasi',
+        text: error.message || 'Terjadi kesalahan saat mengaktifkan notifikasi.'
+      });
     }
   }
 
   /**
-   * Menampilkan notifikasi browser
+   * Matikan push notifications
    */
-  _showNotification(title, body, image = null) {
-    if (Notification.permission !== 'granted') return;
+  async _disableNotifications() {
+    try {
+      const subscription = await this._getSubscription();
+      
+      if (subscription) {
+        // Unsubscribe dari browser
+        await subscription.unsubscribe();
 
-    const options = {
-      body,
-      icon: '/icons/icon-192x192.png',
-      image,
-      badge: '/icons/icon-72x72.png',
-      vibrate: [100, 50, 100],
-    };
+        // Beritahu server
+        try {
+          await ApiService.unsubscribeNotification(subscription.endpoint);
+        } catch (error) {
+          console.warn('Failed to notify server:', error);
+        }
+      }
 
-    new Notification(title, options);
+      this.isEnabled = false;
+      this.subscription = null;
+
+      await Swal.fire({
+        icon: 'info',
+        title: 'Notifikasi Dimatikan',
+        text: 'Anda tidak akan menerima notifikasi lagi.',
+        timer: 2000,
+        showConfirmButton: false
+      });
+
+    } catch (error) {
+      console.error('Error disabling notifications:', error);
+    }
+  }
+
+  /**
+   * Ambil subscription yang ada
+   */
+  async _getSubscription() {
+    try {
+      const registration = await navigator.serviceWorker.ready;
+      return await registration.pushManager.getSubscription();
+    } catch (error) {
+      console.error('Error getting subscription:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Convert VAPID key dari Base64 URL-safe ke Uint8Array
+   */
+  _urlBase64ToUint8Array(base64String) {
+    const padding = '='.repeat((4 - base64String.length % 4) % 4);
+    const base64 = (base64String + padding)
+      .replace(/\-/g, '+')
+      .replace(/_/g, '/');
+
+    const rawData = window.atob(base64);
+    const outputArray = new Uint8Array(rawData.length);
+
+    for (let i = 0; i < rawData.length; ++i) {
+      outputArray[i] = rawData.charCodeAt(i);
+    }
+    return outputArray;
+  }
+
+  /**
+   * Convert ArrayBuffer ke Base64
+   */
+  _arrayBufferToBase64(buffer) {
+    const bytes = new Uint8Array(buffer);
+    let binary = '';
+    for (let i = 0; i < bytes.byteLength; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    return window.btoa(binary);
   }
 }
 
