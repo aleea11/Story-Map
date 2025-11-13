@@ -11,38 +11,29 @@ export function sleep(time = 1000) {
   return new Promise((resolve) => setTimeout(resolve, time));
 }
 
-// ... existing code ...
-
-// PWA Install Prompt
-let deferredPrompt;
+// === INSTALL APP PROMPT ===
+let deferredPrompt = null;
 
 window.addEventListener('beforeinstallprompt', (e) => {
-  console.log('beforeinstallprompt fired');
   e.preventDefault();
   deferredPrompt = e;
-  
-  // Show install button
-  const installBtn = document.getElementById('install-btn');
-  if (installBtn) {
-    installBtn.style.display = 'block';
-    installBtn.addEventListener('click', () => {
+
+  const installBtn = document.createElement('button');
+  installBtn.textContent = '⬇️ Install App';
+  installBtn.className = 'install-btn';
+  document.body.appendChild(installBtn);
+
+  installBtn.addEventListener('click', async () => {
+    if (deferredPrompt) {
       deferredPrompt.prompt();
-      deferredPrompt.userChoice.then((choiceResult) => {
-        console.log('User choice:', choiceResult.outcome);
-        deferredPrompt = null;
-        installBtn.style.display = 'none';
-      });
-    });
-  }
+      const { outcome } = await deferredPrompt.userChoice;
+      if (outcome === 'accepted') console.log('App installed');
+      deferredPrompt = null;
+      installBtn.remove();
+    }
+  });
 });
 
-window.addEventListener('appinstalled', (evt) => {
-  console.log('App was installed');
-  deferredPrompt = null;
-  const installBtn = document.getElementById('install-btn');
-  if (installBtn) {
-    installBtn.style.display = 'none';
-  }
+window.addEventListener('appinstalled', () => {
+  console.log('App berhasil diinstall!');
 });
-
-// ... existing code ...

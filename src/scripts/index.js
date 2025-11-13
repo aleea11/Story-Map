@@ -55,118 +55,20 @@ function handleLogout(e) {
 // SERVICE WORKER REGISTRATION
 // ============================================
 
+// Register Service Worker
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', async () => {
-    try {
-      // Register service worker
-      const registration = await navigator.serviceWorker.register('/sw.js', {
-        scope: '/'
+  window.addEventListener('load', () => {
+    navigator.serviceWorker
+      .register('/service-worker.js')
+      .then((registration) => {
+        console.log('ServiceWorker registered:', registration);
+      })
+      .catch((error) => {
+        console.log('ServiceWorker registration failed:', error);
       });
-      
-      console.log('✅ Service Worker registered successfully:', registration.scope);
-      
-      // Handle updates
-      registration.addEventListener('updatefound', () => {
-        const newWorker = registration.installing;
-        console.log('🔄 Service Worker update found');
-        
-        newWorker.addEventListener('statechange', () => {
-          if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-            console.log('✨ New Service Worker available');
-            // Optionally show update notification
-            showUpdateNotification();
-          }
-        });
-      });
-      
-      // Request notification permission after SW is ready
-      if ('Notification' in window && Notification.permission === 'default') {
-        setTimeout(() => {
-          requestNotificationPermission();
-        }, 3000); // Wait 3 seconds before asking
-      }
-      
-      // Listen for messages from service worker
-      navigator.serviceWorker.addEventListener('message', handleSWMessage);
-      
-    } catch (error) {
-      console.error('❌ Service Worker registration failed:', error);
-    }
   });
 }
 
-// Handle messages from service worker
-function handleSWMessage(event) {
-  console.log('📨 Message from Service Worker:', event.data);
-  
-  const { type, count } = event.data;
-  
-  if (type === 'SYNC_COMPLETE') {
-    if (window.Swal) {
-      window.Swal.fire({
-        icon: 'success',
-        title: 'Sync Selesai',
-        text: `${count} cerita berhasil disinkronisasi`,
-        timer: 2000,
-        showConfirmButton: false
-      });
-    }
-  }
-}
-
-// Request notification permission
-async function requestNotificationPermission() {
-  if (!('Notification' in window)) {
-    console.log('Browser tidak mendukung notifikasi');
-    return;
-  }
-  
-  const permission = Notification.permission;
-  
-  if (permission === 'default') {
-    if (window.Swal) {
-      const result = await window.Swal.fire({
-        title: 'Aktifkan Notifikasi?',
-        text: 'Dapatkan pemberitahuan ketika ada cerita baru!',
-        icon: 'question',
-        showCancelButton: true,
-        confirmButtonText: 'Ya, Aktifkan',
-        cancelButtonText: 'Nanti Saja'
-      });
-      
-      if (result.isConfirmed) {
-        const newPermission = await Notification.requestPermission();
-        if (newPermission === 'granted') {
-          window.Swal.fire({
-            icon: 'success',
-            title: 'Notifikasi Diaktifkan!',
-            text: 'Anda akan mendapat pemberitahuan cerita baru.',
-            timer: 2000,
-            showConfirmButton: false
-          });
-        }
-      }
-    }
-  }
-}
-
-// Show update notification
-function showUpdateNotification() {
-  if (window.Swal) {
-    window.Swal.fire({
-      title: 'Update Tersedia',
-      text: 'Versi baru aplikasi tersedia. Muat ulang untuk update?',
-      icon: 'info',
-      showCancelButton: true,
-      confirmButtonText: 'Muat Ulang',
-      cancelButtonText: 'Nanti'
-    }).then((result) => {
-      if (result.isConfirmed) {
-        window.location.reload();
-      }
-    });
-  }
-}
 
 // ============================================
 // PWA INSTALL PROMPT

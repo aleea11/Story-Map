@@ -1,15 +1,19 @@
 // ============================================
-// SERVICE WORKER - STORY APP
+// SERVICE WORKER - STORY APP (IMPROVED)
 // ============================================
 
-const CACHE_NAME = 'story-app-v1';
+const CACHE_NAME = 'story-app-v2';
 const APP_SHELL = [
   '/',
   '/index.html',
   '/manifest.json',
   '/icon-192x192.png',
   '/icon-512x512.png',
-  '/favicon.png'
+  '/favicon.png',
+  'https://cdn.jsdelivr.net/npm/sweetalert2@11.7.32/dist/sweetalert2.min.css',
+  'https://cdn.jsdelivr.net/npm/sweetalert2@11.7.32/dist/sweetalert2.min.js',
+  'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',
+  'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
 ];
 
 // ============================================
@@ -22,7 +26,17 @@ self.addEventListener('install', (event) => {
     caches.open(CACHE_NAME)
       .then((cache) => {
         console.log('Service Worker: Caching App Shell');
-        return cache.addAll(APP_SHELL);
+        return cache.addAll(APP_SHELL.map(url => new Request(url, {mode: 'no-cors'})))
+          .catch(err => {
+            console.log('Some resources failed to cache, but continuing:', err);
+            // Cache individual items that succeed
+            return Promise.all(
+              APP_SHELL.map(url => 
+                cache.add(new Request(url, {mode: 'no-cors'}))
+                  .catch(e => console.log('Failed to cache:', url))
+              )
+            );
+          });
       })
       .then(() => {
         console.log('Service Worker: App Shell Cached');
@@ -57,7 +71,7 @@ self.addEventListener('activate', (event) => {
 });
 
 // ============================================
-// FETCH - Cache Strategy
+// FETCH - Enhanced Cache Strategy
 // ============================================
 self.addEventListener('fetch', (event) => {
   const { request } = event;
@@ -73,6 +87,7 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       fetch(request)
         .then((response) => {
+          // Clone response before caching
           const clonedResponse = response.clone();
           caches.open(CACHE_NAME).then((cache) => {
             cache.put(request, clonedResponse);
@@ -80,13 +95,29 @@ self.addEventListener('fetch', (event) => {
           return response;
         })
         .catch(() => {
-          return caches.match(request);
+          // Return cached version if network fails
+          return caches.match(request)
+            .then(cachedResponse => {
+              if (cachedResponse) {
+                return cachedResponse;
+              }
+              // Return offline fallback
+              return new Response(
+                JSON.stringify({ 
+                  error: true, 
+                  message: 'Offline - Data tidak tersedia' 
+                }),
+                { 
+                  headers: { 'Content-Type': 'application/json' }
+                }
+              );
+            });
         })
     );
     return;
   }
 
-  // Cache First for App Shell
+  // Cache First for App Shell & Assets
   event.respondWith(
     caches.match(request)
       .then((cachedResponse) => {
@@ -101,33 +132,43 @@ self.addEventListener('fetch', (event) => {
               return response;
             }
 
+            // Clone response for caching
             const responseToCache = response.clone();
             caches.open(CACHE_NAME).then((cache) => {
               cache.put(request, responseToCache);
             });
 
             return response;
+          })
+          .catch(() => {
+            // Return offline page for navigation requests
+            if (request.mode === 'navigate') {
+              return caches.match('/index.html');
+            }
+            // Return empty response for other failed requests
+            return new Response('', { status: 404 });
           });
       })
   );
 });
 
 // ============================================
-// PUSH NOTIFICATION - KRITERIA 2
+// PUSH NOTIFICATION
 // ============================================
 self.addEventListener('push', (event) => {
   console.log('🔔 Push notification received:', event);
 
   let notificationData = {
-    title: 'Notifikasi Baru',
-    body: 'Ada data baru ditambahkan.',
+    title: 'Cerita Baru!',
+    body: 'Ada cerita baru ditambahkan ke komunitas.',
     icon: '/icon-192x192.png',
     badge: '/icon-192x192.png',
     tag: 'story-notification',
-    requireInteraction: false
+    requireInteraction: false,
+    data: { url: '/' }
   };
 
-  // Parse data jika ada
+  // Parse data if available
   if (event.data) {
     try {
       const data = event.data.json();
@@ -137,7 +178,7 @@ self.addEventListener('push', (event) => {
         icon: data.icon || notificationData.icon,
         badge: data.badge || notificationData.badge,
         tag: data.tag || notificationData.tag,
-        data: data.url || '/'
+        data: { url: data.url || '/' }
       };
     } catch (error) {
       console.log('Using default notification data');
@@ -151,7 +192,11 @@ self.addEventListener('push', (event) => {
       badge: notificationData.badge,
       tag: notificationData.tag,
       requireInteraction: notificationData.requireInteraction,
-      data: notificationData.data
+      data: notificationData.data,
+      actions: [
+        { action: 'open', title: 'Lihat' },
+        { action: 'close', title: 'Tutup' }
+      ]
     })
   );
 });
@@ -164,7 +209,11 @@ self.addEventListener('notificationclick', (event) => {
   
   event.notification.close();
 
-  const urlToOpen = event.notification.data || '/';
+  if (event.action === 'close') {
+    return;
+  }
+
+  const urlToOpen = event.notification.data?.url || '/';
 
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true })
@@ -172,7 +221,7 @@ self.addEventListener('notificationclick', (event) => {
         // Check if there's already a window open
         for (let i = 0; i < clientList.length; i++) {
           const client = clientList[i];
-          if (client.url === urlToOpen && 'focus' in client) {
+          if (client.url.includes(urlToOpen) && 'focus' in client) {
             return client.focus();
           }
         }
@@ -186,7 +235,7 @@ self.addEventListener('notificationclick', (event) => {
 });
 
 // ============================================
-// BACKGROUND SYNC (Optional Enhancement)
+// BACKGROUND SYNC
 // ============================================
 self.addEventListener('sync', (event) => {
   console.log('Background sync triggered:', event.tag);
@@ -197,7 +246,6 @@ self.addEventListener('sync', (event) => {
         .then(() => {
           console.log('✅ Background sync completed');
           
-          // Notify all clients
           return self.clients.matchAll().then((clients) => {
             clients.forEach((client) => {
               client.postMessage({
@@ -215,9 +263,19 @@ self.addEventListener('sync', (event) => {
 });
 
 async function syncOfflineData() {
-  // This would sync with IndexedDB
-  // Implementation depends on your data structure
+  // Placeholder for IndexedDB sync
   return Promise.resolve();
 }
+
+// ============================================
+// MESSAGE HANDLER
+// ============================================
+self.addEventListener('message', (event) => {
+  console.log('Message received in SW:', event.data);
+  
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+});
 
 console.log('✅ Service Worker loaded successfully');
