@@ -1,7 +1,6 @@
 import ApiService from '../../data/api.js'; 
 import { showFormattedDate } from '../../utils/index.js';
 import IndexedDBHelper from '../../utils/idb.js';
-import PushNotificationManager from '../../utils/push-notification.js';
 
 export default class HomePage {
   constructor() {

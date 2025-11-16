@@ -43,6 +43,8 @@ export default class AddStoryPage {
     this._initMap();
     this._initCamera();
     this._initForm();
+    
+    await this._checkAndRequestNotificationPermission();
   }
 
   _initMap() {
@@ -155,6 +157,10 @@ export default class AddStoryPage {
         return;
       }
       
+      // Clear error messages
+      document.getElementById('description-error').textContent = '';
+      document.getElementById('photo-error').textContent = '';
+      
       // Show loading state
       submitBtn.disabled = true;
       submitBtn.textContent = 'Sedang Menambah Cerita...';
@@ -199,6 +205,9 @@ export default class AddStoryPage {
             : await ApiService.addStoryGuest(apiData);
           
           if (!result.error) {
+            // ✅✅✅ TRIGGER PUSH NOTIFICATION DI SINI ✅✅✅
+            await this._triggerPushNotification(description);
+            
             await Swal.fire({
               icon: 'success',
               title: 'Cerita Berhasil Ditambahkan!',
@@ -238,4 +247,241 @@ export default class AddStoryPage {
       }
     });
   }
+
+  // ============================================
+  // ✅ PUSH NOTIFICATION FUNCTIONS
+  // ============================================
+
+  async _checkAndRequestNotificationPermission() {
+    try {
+      // Check if browser supports notifications
+      if (!('Notification' in window)) {
+        console.log('Browser tidak support notifications');
+        return;
+      }
+
+      // Check if service worker is supported
+      if (!('serviceWorker' in navigator)) {
+        console.log('Browser tidak support service worker');
+        return;
+      }
+
+      // Check current permission status
+      const permission = Notification.permission;
+      console.log('Current notification permission:', permission);
+
+      // If default (not asked yet), don't auto-request
+      // User will be asked when they enable toggle on homepage
+      if (permission === 'default') {
+        console.log('Notification permission belum diminta');
+        return;
+      }
+
+      // If denied, inform user
+      if (permission === 'denied') {
+        console.log('Notification permission ditolak oleh user');
+        return;
+      }
+
+      // If granted, ensure we have subscription
+      if (permission === 'granted') {
+        console.log('✅ Notification permission granted');
+        await this._ensurePushSubscription();
+      }
+
+    } catch (error) {
+      console.error('Error checking notification permission:', error);
+    }
+  }
+
+  async _ensurePushSubscription() {
+    try {
+      const registration = await navigator.serviceWorker.ready;
+      let subscription = await registration.pushManager.getSubscription();
+
+      if (!subscription) {
+        console.log('Tidak ada subscription, membuat baru...');
+        
+        // VAPID public key dari API Dicoding
+        const VAPID_PUBLIC_KEY = 'BN7-r0Svv7CsTi18-OPYtJLVW0bfuZ1x1UhyhHsQCIqKu543pM8sK5EPTYaFmNt3S-7dVbPVGK34jF6LVXzH9Xo';
+        
+        subscription = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: this._urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
+        });
+
+        console.log('✅ Push subscription created:', subscription.endpoint);
+
+        // Optional: Send subscription to your server
+        // await this._sendSubscriptionToServer(subscription);
+      } else {
+        console.log('✅ Push subscription sudah ada:', subscription.endpoint);
+      }
+
+    } catch (error) {
+      console.error('Error ensuring push subscription:', error);
+    }
+  }
+
+  async _triggerPushNotification(description) {
+    try {
+      console.log('🔔 Triggering push notification...');
+
+      // Check if Service Worker and Push API are supported
+      if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+        console.log('❌ Push notifications not supported');
+        return;
+      }
+
+      // Get service worker registration
+      const registration = await navigator.serviceWorker.ready;
+      
+      // Check if user has granted permission
+      if (Notification.permission !== 'granted') {
+        console.log('❌ Push notification permission not granted');
+        
+        // Request permission
+        const permission = await Notification.requestPermission();
+        if (permission !== 'granted') {
+          console.log('❌ User denied notification permission');
+          return;
+        }
+      }
+
+      // Get current subscription
+      let subscription = await registration.pushManager.getSubscription();
+      
+      if (!subscription) {
+        console.log('⚠️ No push subscription, creating one...');
+        await this._ensurePushSubscription();
+        subscription = await registration.pushManager.getSubscription();
+      }
+
+      console.log('✅ Push subscription ready:', subscription ? 'YES' : 'NO');
+
+      await registration.showNotification('Notifikasi Baru', {
+        body: 'Ada data baru ditambahkan.',
+        icon: '/icons/icon.png',
+        badge: '/icons/icon.png',
+        tag: 'new-story-' + Date.now(),
+        requireInteraction: false,
+        data: { 
+          url: '/',
+          dateOfArrival: Date.now(),
+          primaryKey: 1
+        },
+        actions: [
+          { 
+            action: 'open', 
+            title: 'Lihat',
+            icon: '/icons/icon.png'
+          },
+          { 
+            action: 'close', 
+            title: 'Tutup'
+          }
+        ]
+      });
+
+      console.log('✅ Push notification displayed successfully!');
+
+      // ============================================
+      // 📝 PRODUCTION NOTE:
+      // ============================================
+      // Di production, setelah story berhasil ditambah, backend server
+      // harus mengirim push notification ke semua subscribers menggunakan
+      // subscription endpoint dan VAPID keys.
+      //
+      // Contoh (di backend Node.js dengan web-push library):
+      // 
+      // const webpush = require('web-push');
+      // 
+      // webpush.setVapidDetails(
+      //   'mailto:your-email@example.com',
+      //   VAPID_PUBLIC_KEY,
+      //   VAPID_PRIVATE_KEY
+      // );
+      //
+      // const notificationPayload = {
+      //   notification: {
+      //     title: 'Notifikasi Baru',
+      //     body: 'Ada data baru ditambahkan.',
+      //     icon: '/icons/icon-192x192.png'
+      //   }
+      // };
+      //
+      // subscriptions.forEach(subscription => {
+      //   webpush.sendNotification(subscription, JSON.stringify(notificationPayload));
+      // });
+      // ============================================
+
+    } catch (error) {
+      console.error('❌ Error triggering push notification:', error);
+      
+      // Fallback: Show browser notification jika push API gagal
+      if (Notification.permission === 'granted') {
+        new Notification('Notifikasi Baru', {
+          body: 'Ada data baru ditambahkan.',
+          icon: '/icons/icon-192x192.png'
+        });
+      }
+    }
+  }
+
+  /**
+   * Convert VAPID key dari Base64 URL-safe ke Uint8Array
+   */
+  _urlBase64ToUint8Array(base64String) {
+    const padding = '='.repeat((4 - base64String.length % 4) % 4);
+    const base64 = (base64String + padding)
+      .replace(/\-/g, '+')
+      .replace(/_/g, '/');
+
+    const rawData = window.atob(base64);
+    const outputArray = new Uint8Array(rawData.length);
+
+    for (let i = 0; i < rawData.length; ++i) {
+      outputArray[i] = rawData.charCodeAt(i);
+    }
+    return outputArray;
+  }
+
+  /**
+   * Optional: Send subscription to server
+   * (Uncomment jika ada backend endpoint untuk menyimpan subscription)
+   */
+  /*
+  async _sendSubscriptionToServer(subscription) {
+    try {
+      const subscriptionData = {
+        endpoint: subscription.endpoint,
+        keys: {
+          p256dh: this._arrayBufferToBase64(subscription.getKey('p256dh')),
+          auth: this._arrayBufferToBase64(subscription.getKey('auth'))
+        }
+      };
+
+      const response = await fetch('/api/save-subscription', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(subscriptionData)
+      });
+
+      if (response.ok) {
+        console.log('✅ Subscription saved to server');
+      }
+    } catch (error) {
+      console.error('❌ Error sending subscription to server:', error);
+    }
+  }
+
+  _arrayBufferToBase64(buffer) {
+    const bytes = new Uint8Array(buffer);
+    let binary = '';
+    for (let i = 0; i < bytes.byteLength; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    return window.btoa(binary);
+  }
+  */
 }
