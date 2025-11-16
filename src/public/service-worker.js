@@ -1,22 +1,25 @@
 // ============================================
-// SERVICE WORKER - OFFLINE READY
+// FIXED SERVICE WORKER - OFFLINE READY
+// File: src/public/service-worker.js
 // ============================================
 
-const CACHE_NAME = 'story-app-v4';
+const CACHE_NAME = 'story-app-v5';
 
 // APP SHELL - File yang HARUS di-cache untuk offline
 const APP_SHELL = [
   '/',
   '/index.html',
   '/manifest.json',
-  '/favicon.png'
+  '/favicon.png',
+  '/icons/icon.png',
+  '/icons/icon-512x512.png'
 ];
 
 // ============================================
 // INSTALL - Cache App Shell
 // ============================================
 self.addEventListener('install', (event) => {
-  console.log('[SW] Installing Service Worker...');
+  console.log('[SW] Installing Service Worker v5...');
   
   event.waitUntil(
     caches.open(CACHE_NAME)
@@ -25,11 +28,16 @@ self.addEventListener('install', (event) => {
         
         // Cache file satu per satu untuk menghindari error
         const cachePromises = APP_SHELL.map(url => {
-          return cache.add(url)
-            .then(() => console.log(`[SW] ✅ Cached: ${url}`))
+          return fetch(url)
+            .then(response => {
+              if (response.ok) {
+                return cache.put(url, response);
+              }
+              console.warn(`[SW] Failed to fetch ${url}:`, response.status);
+              return Promise.resolve();
+            })
             .catch(error => {
-              console.warn(`[SW] ❌ Failed to cache ${url}:`, error);
-              // Continue despite errors
+              console.warn(`[SW] Error caching ${url}:`, error);
               return Promise.resolve();
             });
         });
@@ -37,7 +45,7 @@ self.addEventListener('install', (event) => {
         return Promise.all(cachePromises);
       })
       .then(() => {
-        console.log('[SW] All App Shell files cached');
+        console.log('[SW] App Shell cached successfully');
         return self.skipWaiting();
       })
       .catch((error) => {
@@ -50,7 +58,7 @@ self.addEventListener('install', (event) => {
 // ACTIVATE - Clean Old Caches
 // ============================================
 self.addEventListener('activate', (event) => {
-  console.log('[SW] Activating Service Worker...');
+  console.log('[SW] Activating Service Worker v5...');
   
   event.waitUntil(
     caches.keys()
@@ -72,7 +80,7 @@ self.addEventListener('activate', (event) => {
 });
 
 // ============================================
-// FETCH - Strategi Hybrid
+// FETCH - OFFLINE FIRST STRATEGY
 // ============================================
 self.addEventListener('fetch', (event) => {
   const { request } = event;
@@ -83,12 +91,95 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // ========== API REQUESTS (Network First) ==========
+  // ========== STRATEGI KHUSUS UNTUK NAVIGATION ==========
+  // Ini yang membuat offline mode bekerja!
+  if (request.mode === 'navigate' || request.destination === 'document') {
+    event.respondWith(
+      caches.match('/index.html')
+        .then((cachedResponse) => {
+          if (cachedResponse) {
+            console.log('[SW] Returning cached index.html for navigation');
+            return cachedResponse;
+          }
+          
+          // Fallback: try network
+          return fetch(request)
+            .then(response => {
+              if (response.ok) {
+                // Cache the response
+                caches.open(CACHE_NAME).then(cache => {
+                  cache.put('/index.html', response.clone());
+                });
+                return response;
+              }
+              return response;
+            })
+            .catch(() => {
+              // Ultimate fallback
+              return new Response(
+                `<!DOCTYPE html>
+                <html>
+                <head>
+                  <title>Offline - Story App</title>
+                  <style>
+                    body {
+                      font-family: Arial, sans-serif;
+                      display: flex;
+                      align-items: center;
+                      justify-content: center;
+                      min-height: 100vh;
+                      margin: 0;
+                      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                      color: white;
+                    }
+                    .container {
+                      text-align: center;
+                      padding: 2rem;
+                      max-width: 500px;
+                    }
+                    h1 { font-size: 3rem; margin: 0 0 1rem 0; }
+                    p { font-size: 1.2rem; margin: 0 0 2rem 0; opacity: 0.9; }
+                    .emoji { font-size: 5rem; margin-bottom: 1rem; }
+                    button {
+                      background: white;
+                      color: #667eea;
+                      border: none;
+                      padding: 1rem 2rem;
+                      font-size: 1rem;
+                      font-weight: bold;
+                      border-radius: 50px;
+                      cursor: pointer;
+                      transition: transform 0.2s;
+                    }
+                    button:hover { transform: scale(1.05); }
+                  </style>
+                </head>
+                <body>
+                  <div class="container">
+                    <div class="emoji">📴</div>
+                    <h1>Sedang Offline</h1>
+                    <p>Aplikasi tidak dapat terhubung ke internet. Pastikan koneksi internet Anda aktif.</p>
+                    <button onclick="location.reload()">🔄 Coba Lagi</button>
+                  </div>
+                </body>
+                </html>`,
+                {
+                  status: 503,
+                  statusText: 'Service Unavailable',
+                  headers: { 'Content-Type': 'text/html' }
+                }
+              );
+            });
+        })
+    );
+    return;
+  }
+
+  // ========== API REQUESTS (Network First, Fallback to Cache) ==========
   if (url.origin === 'https://story-api.dicoding.dev') {
     event.respondWith(
       fetch(request)
         .then((response) => {
-          // Clone dan cache response yang berhasil
           if (response && response.status === 200) {
             const clonedResponse = response.clone();
             caches.open(CACHE_NAME).then((cache) => {
@@ -98,14 +189,12 @@ self.addEventListener('fetch', (event) => {
           return response;
         })
         .catch(() => {
-          // Fallback ke cache jika network error
           return caches.match(request)
             .then(cachedResponse => {
               if (cachedResponse) {
                 console.log('[SW] Returning cached API response for:', url.pathname);
                 return cachedResponse;
               }
-              // Return error response
               return new Response(
                 JSON.stringify({ 
                   error: true, 
@@ -147,38 +236,39 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // ========== APP RESOURCES (Cache First with Network Fallback) ==========
+  // ========== APP RESOURCES (Cache First, Update in Background) ==========
   event.respondWith(
     caches.match(request)
       .then((cachedResponse) => {
+        // Return cache immediately
         if (cachedResponse) {
           console.log('[SW] Cache hit for:', url.pathname);
           
-          // Return cache tapi update di background
-          fetch(request).then((response) => {
-            if (response && response.status === 200) {
-              caches.open(CACHE_NAME).then((cache) => {
-                cache.put(request, response);
-              });
-            }
-          }).catch(() => {
-            // Silent fail
-          });
+          // Update cache in background
+          fetch(request)
+            .then((response) => {
+              if (response && response.status === 200) {
+                caches.open(CACHE_NAME).then((cache) => {
+                  cache.put(request, response);
+                });
+              }
+            })
+            .catch(() => {
+              // Silent fail
+            });
           
           return cachedResponse;
         }
         
+        // Cache miss - fetch from network
         console.log('[SW] Cache miss, fetching:', url.pathname);
         
-        // Jika tidak ada di cache, fetch dari network
         return fetch(request)
           .then((response) => {
-            // Jangan cache jika response tidak valid
             if (!response || response.status !== 200 || response.type === 'error') {
               return response;
             }
 
-            // Clone dan cache response
             const responseToCache = response.clone();
             caches.open(CACHE_NAME).then((cache) => {
               cache.put(request, responseToCache);
@@ -187,27 +277,9 @@ self.addEventListener('fetch', (event) => {
             return response;
           })
           .catch((error) => {
-            console.log('[SW] Fetch failed for:', url.pathname, error);
+            console.log('[SW] Fetch failed for:', url.pathname);
             
-            // Offline fallback untuk navigation requests
-            if (request.mode === 'navigate' || request.destination === 'document') {
-              return caches.match('/index.html')
-                .then(response => {
-                  if (response) {
-                    return response;
-                  }
-                  // Ultimate fallback
-                  return new Response(
-                    '<h1>Offline</h1><p>Aplikasi sedang offline dan halaman ini belum di-cache.</p>',
-                    { 
-                      status: 503,
-                      headers: { 'Content-Type': 'text/html' }
-                    }
-                  );
-                });
-            }
-            
-            // Untuk resource lain, return empty response
+            // Return empty response for non-critical resources
             return new Response('', { 
               status: 404,
               statusText: 'Not Found' 
@@ -226,8 +298,8 @@ self.addEventListener('push', (event) => {
   let notificationData = {
     title: 'Notifikasi Baru',
     body: 'Ada data baru ditambahkan.',
-    icon: '/icons/icon-192x192.png',
-    badge: '/icons/icon-72x72.png',
+    icon: '/icons/icon.png',
+    badge: '/icons/icon.png',
     tag: 'story-notification',
     requireInteraction: false,
     data: { url: '/' }
@@ -237,8 +309,8 @@ self.addEventListener('push', (event) => {
     try {
       const data = event.data.json();
       notificationData = {
-        title: data.title || 'Cerita Baru!',
-        body: data.body || 'Ada cerita baru ditambahkan ke komunitas.',
+        title: data.title || 'Notifikasi Baru',
+        body: data.body || 'Ada data baru ditambahkan.',
         icon: data.icon || notificationData.icon,
         badge: data.badge || notificationData.badge,
         tag: data.tag || notificationData.tag,

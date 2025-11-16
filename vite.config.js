@@ -2,22 +2,29 @@ import { defineConfig } from 'vite';
 import { resolve } from 'path';
 import { copyFileSync, existsSync, mkdirSync } from 'fs';
 
-// Plugin untuk copy Service Worker
+// ============================================
+// FIXED: Copy Service Worker dari src/public ke dist
+// ============================================
 function copyServiceWorkerPlugin() {
   return {
     name: 'copy-service-worker',
     closeBundle() {
-      const swSource = resolve(__dirname, 'src', 'public', 'sw.js');
+      const swSource = resolve(__dirname, 'src', 'public', 'service-worker.js');
       const distDir = resolve(__dirname, 'dist');
-      const swDest = resolve(distDir, 'sw.js');
+      const swDest = resolve(distDir, 'service-worker.js');
       
+      // Ensure dist directory exists
       if (!existsSync(distDir)) {
         mkdirSync(distDir, { recursive: true });
       }
       
       try {
-        copyFileSync(swSource, swDest);
-        console.log('✅ Service Worker copied to dist/sw.js');
+        if (existsSync(swSource)) {
+          copyFileSync(swSource, swDest);
+          console.log('✅ Service Worker copied from src/public/service-worker.js to dist/service-worker.js');
+        } else {
+          console.error('❌ Service Worker source not found at:', swSource);
+        }
       } catch (error) {
         console.error('❌ Failed to copy Service Worker:', error);
       }
@@ -43,7 +50,7 @@ export default defineConfig({
     },
   },
   plugins: [
-    copyServiceWorkerPlugin()  // ← PLUGIN INI WAJIB!
+    copyServiceWorkerPlugin()
   ],
   server: {
     port: 3000,

@@ -17,17 +17,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     await app.renderPage();
   });
 
-  // Handle authentication UI
   updateAuthUI();
   
-  // Setup logout button
   const logoutBtn = document.getElementById('logout-btn');
   if (logoutBtn) {
     logoutBtn.addEventListener('click', handleLogout);
   }
 });
 
-// Update auth UI based on login status
 function updateAuthUI() {
   const token = localStorage.getItem('token');
   const authLinks = document.getElementById('auth-links');
@@ -42,7 +39,6 @@ function updateAuthUI() {
   }
 }
 
-// Handle logout
 function handleLogout(e) {
   e.preventDefault();
   localStorage.removeItem('token');
@@ -62,26 +58,23 @@ if ('serviceWorker' in navigator) {
         scope: '/'
       });
       
-      console.log('✅ Service Worker registered successfully:', registration.scope);
+      console.log('✅ SW registered:', registration.scope);
       
-      // Check for updates
       registration.addEventListener('updatefound', () => {
         const newWorker = registration.installing;
-        console.log('🔄 Service Worker update found');
+        console.log('🔄 SW update found');
         
         newWorker.addEventListener('statechange', () => {
           if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-            console.log('✅ New Service Worker installed, refresh to update');
+            console.log('✅ New SW installed');
             
-            // Show update notification
             if (window.Swal) {
               Swal.fire({
                 title: 'Update Tersedia',
-                text: 'Aplikasi telah diperbarui. Refresh halaman untuk mendapatkan versi terbaru.',
+                text: 'Refresh untuk update',
                 icon: 'info',
-                confirmButtonText: 'Refresh Sekarang',
-                showCancelButton: true,
-                cancelButtonText: 'Nanti'
+                confirmButtonText: 'Refresh',
+                showCancelButton: true
               }).then((result) => {
                 if (result.isConfirmed) {
                   window.location.reload();
@@ -93,11 +86,11 @@ if ('serviceWorker' in navigator) {
       });
       
     } catch (error) {
-      console.error('❌ Service Worker registration failed:', error);
+      console.error('❌ SW registration failed:', error);
     }
   });
 } else {
-  console.warn('⚠️ Service Worker not supported in this browser');
+  console.warn('⚠️ Service Worker not supported');
 }
 
 // ============================================
@@ -107,20 +100,14 @@ if ('serviceWorker' in navigator) {
 let deferredPrompt = null;
 let installButton = null;
 
-// Create install button
 function createInstallButton() {
-  // Check if button already exists
-  if (document.getElementById('install-btn')) {
-    return;
-  }
+  if (document.getElementById('install-btn')) return;
   
   installButton = document.createElement('button');
   installButton.id = 'install-btn';
   installButton.className = 'btn install-btn';
   installButton.textContent = '📱 Install App';
-  installButton.setAttribute('aria-label', 'Install aplikasi ke perangkat');
   
-  // Style inline untuk memastikan terlihat
   installButton.style.cssText = `
     position: fixed;
     bottom: 80px;
@@ -135,75 +122,63 @@ function createInstallButton() {
     font-weight: bold;
     box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
     opacity: 0;
-    transform: translateY(20px);
     transition: all 0.3s ease;
   `;
   
   installButton.addEventListener('click', handleInstallClick);
-  
   document.body.appendChild(installButton);
   
-  // Animate in
   setTimeout(() => {
     installButton.style.opacity = '1';
     installButton.style.transform = 'translateY(0)';
   }, 100);
   
-  console.log('✅ Install button created and added to DOM');
+  console.log('✅ Install button created');
 }
 
-// Handle install button click
 async function handleInstallClick() {
-  console.log('🖱️ Install button clicked');
+  console.log('🖱️ Install clicked');
   
   if (!deferredPrompt) {
-    console.warn('⚠️ No deferred prompt available');
+    console.warn('⚠️ No deferred prompt');
     
-    // Show info to user
     if (window.Swal) {
       Swal.fire({
         icon: 'info',
         title: 'Sudah Terinstall',
-        text: 'Aplikasi mungkin sudah terinstall atau browser tidak mendukung instalasi PWA.',
+        text: 'Aplikasi mungkin sudah terinstall',
         confirmButtonText: 'OK'
       });
     }
     return;
   }
   
-  // Show install prompt
   deferredPrompt.prompt();
   
-  // Wait for user response
   const { outcome } = await deferredPrompt.userChoice;
   console.log(`User response: ${outcome}`);
   
   if (outcome === 'accepted') {
-    console.log('✅ User accepted installation');
+    console.log('✅ Install accepted');
     
     if (window.Swal) {
       Swal.fire({
         icon: 'success',
         title: 'Aplikasi Terinstall!',
-        text: 'Aplikasi berhasil ditambahkan ke home screen.',
+        text: 'Aplikasi ditambahkan ke home screen',
         timer: 2000,
         showConfirmButton: false
       });
     }
-  } else {
-    console.log('❌ User dismissed installation');
   }
   
-  // Clear deferred prompt
   deferredPrompt = null;
   hideInstallButton();
 }
 
-// Hide install button
 function hideInstallButton() {
   if (installButton) {
     installButton.style.opacity = '0';
-    installButton.style.transform = 'translateY(20px)';
     setTimeout(() => {
       if (installButton && installButton.parentNode) {
         installButton.parentNode.removeChild(installButton);
@@ -213,62 +188,38 @@ function hideInstallButton() {
   }
 }
 
-// Listen for beforeinstallprompt event
+// Listen for beforeinstallprompt
 window.addEventListener('beforeinstallprompt', (e) => {
-  console.log('📱 beforeinstallprompt event fired');
-  
-  // Prevent default mini-infobar
+  console.log('📱 beforeinstallprompt fired');
   e.preventDefault();
-  
-  // Store event for later use
   deferredPrompt = e;
-  
-  // Show install button
   createInstallButton();
 });
 
-// Listen for app installed event
+// Listen for appinstalled
 window.addEventListener('appinstalled', () => {
-  console.log('✅ App installed successfully');
-  
-  // Clear deferred prompt
+  console.log('✅ App installed');
   deferredPrompt = null;
-  
-  // Hide install button
   hideInstallButton();
   
-  // Show success message
   if (window.Swal) {
     Swal.fire({
       icon: 'success',
       title: 'Terima Kasih!',
-      text: 'Aplikasi berhasil diinstall di perangkat Anda.',
+      text: 'Aplikasi berhasil diinstall',
       timer: 2000,
       showConfirmButton: false
     });
   }
-  
-  // Track installation (optional analytics)
-  console.log('PWA installation completed');
 });
 
-// Detect if app is running in standalone mode
+// Check if already in standalone
 if (window.matchMedia('(display-mode: standalone)').matches) {
-  console.log('🚀 App running in standalone mode');
-  
-  // Hide install button if already installed
-  const existingButton = document.getElementById('install-btn');
-  if (existingButton) {
-    existingButton.style.display = 'none';
+  console.log('🚀 Running in standalone mode');
+  const existingBtn = document.getElementById('install-btn');
+  if (existingBtn) {
+    existingBtn.style.display = 'none';
   }
-}
-
-// Check if already installed (for browsers that don't fire appinstalled)
-if (navigator.standalone || window.matchMedia('(display-mode: standalone)').matches) {
-  console.log('✅ App is already installed');
-  // Don't show install button
-} else {
-  console.log('ℹ️ App not installed yet, waiting for beforeinstallprompt...');
 }
 
 // ============================================
@@ -282,20 +233,11 @@ window.addEventListener('online', () => {
     Swal.fire({
       icon: 'success',
       title: 'Kembali Online',
-      text: 'Koneksi internet tersambung kembali.',
+      text: 'Koneksi internet tersambung',
       timer: 2000,
       showConfirmButton: false,
       position: 'bottom-end',
       toast: true
-    });
-  }
-  
-  // Trigger background sync
-  if ('serviceWorker' in navigator && 'sync' in ServiceWorkerRegistration.prototype) {
-    navigator.serviceWorker.ready.then((registration) => {
-      return registration.sync.register('sync-stories');
-    }).catch((error) => {
-      console.error('Background sync registration failed:', error);
     });
   }
 });
@@ -307,7 +249,7 @@ window.addEventListener('offline', () => {
     Swal.fire({
       icon: 'warning',
       title: 'Sedang Offline',
-      text: 'Beberapa fitur mungkin tidak tersedia. Data akan dimuat dari cache.',
+      text: 'Data dimuat dari cache',
       timer: 2000,
       showConfirmButton: false,
       position: 'bottom-end',
@@ -316,5 +258,4 @@ window.addEventListener('offline', () => {
   }
 });
 
-// Log initial network status
 console.log(`Network status: ${navigator.onLine ? '🟢 Online' : '🔴 Offline'}`);
